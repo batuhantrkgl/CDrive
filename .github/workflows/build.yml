@@ -61,12 +61,12 @@ jobs:
             platform: darwin-x86_64
             arch: x86_64
             deps_install: |
-              brew install curl json-c
+              brew install curl json-c pkg-config
           - os: macos-latest
             platform: darwin-arm64
             arch: arm64
             deps_install: |
-              brew install curl json-c
+              brew install curl json-c pkg-config
           # Windows builds
           - os: windows-latest
             platform: windows-x86_64
@@ -138,13 +138,15 @@ jobs:
       if: matrix.platform == 'darwin-x86_64' && steps.should_build.outputs.should_build == 'true'
       run: |
         make clean
-        ${{ github.event.inputs.debug == 'true' && 'make debug CFLAGS="-arch x86_64 -g -DDEBUG"' || 'make CFLAGS="-arch x86_64"' }}
+        export PKG_CONFIG_PATH="$(brew --prefix)/lib/pkgconfig:$PKG_CONFIG_PATH"
+        ${{ github.event.inputs.debug == 'true' && 'make debug CFLAGS="-arch x86_64 -g -DDEBUG $(pkg-config --cflags libcurl json-c)" LDFLAGS="-arch x86_64 $(pkg-config --libs libcurl json-c)"' || 'make CFLAGS="-arch x86_64 $(pkg-config --cflags libcurl json-c)" LDFLAGS="-arch x86_64 $(pkg-config --libs libcurl json-c)"' }}
         
     - name: Build (macOS ARM64)
       if: matrix.platform == 'darwin-arm64' && steps.should_build.outputs.should_build == 'true'
       run: |
         make clean
-        ${{ github.event.inputs.debug == 'true' && 'make debug CFLAGS="-arch arm64 -g -DDEBUG"' || 'make CFLAGS="-arch arm64"' }}
+        export PKG_CONFIG_PATH="$(brew --prefix)/lib/pkgconfig:$PKG_CONFIG_PATH"
+        ${{ github.event.inputs.debug == 'true' && 'make debug CFLAGS="-arch arm64 -g -DDEBUG $(pkg-config --cflags libcurl json-c)" LDFLAGS="-arch arm64 $(pkg-config --libs libcurl json-c)"' || 'make CFLAGS="-arch arm64 $(pkg-config --cflags libcurl json-c)" LDFLAGS="-arch arm64 $(pkg-config --libs libcurl json-c)"' }}
         
     - name: Build (Windows)
       if: startsWith(matrix.platform, 'windows') && steps.should_build.outputs.should_build == 'true'
