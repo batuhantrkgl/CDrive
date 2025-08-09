@@ -15,6 +15,7 @@
     #include <conio.h>
     #include <direct.h>
     #include <io.h>
+    #include <sys/stat.h>
     #define mkdir(path, mode) _mkdir(path)
     #define access(path, mode) _access(path, mode)
     #define F_OK 0

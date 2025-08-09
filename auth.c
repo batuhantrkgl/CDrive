@@ -97,14 +97,14 @@ void print_header(const char *title) {
 
 int setup_config_dir(void) {
     char config_path[MAX_PATH_SIZE];
-    const char *home_dir = getenv("HOME");
+    const char *home_dir = getenv(HOME_ENV);
     
     if (!home_dir) {
         print_error("Unable to determine home directory");
         return -1;
     }
     
-    snprintf(config_path, sizeof(config_path), "%s/%s", home_dir, CONFIG_DIR);
+    snprintf(config_path, sizeof(config_path), "%s%s%s", home_dir, PATH_SEP, CONFIG_DIR);
     
     struct stat st = {0};
     if (stat(config_path, &st) == -1) {
@@ -156,9 +156,9 @@ static int interactive_credential_setup(void) {
     char client_id[512];
     char client_secret[256];
     char config_path[MAX_PATH_SIZE];
-    const char *home_dir = getenv("HOME");
+    const char *home_dir = getenv(HOME_ENV);
     
-    snprintf(config_path, sizeof(config_path), "%s/%s/%s", home_dir, CONFIG_DIR, CLIENT_ID_FILE);
+    snprintf(config_path, sizeof(config_path), "%s%s%s%s%s", home_dir, PATH_SEP, CONFIG_DIR, PATH_SEP, CLIENT_ID_FILE);
     
     printf("\n");
     
@@ -203,9 +203,9 @@ static int interactive_credential_setup(void) {
 
 int load_client_credentials(ClientCredentials *creds) {
     char config_path[MAX_PATH_SIZE];
-    const char *home_dir = getenv("HOME");
+    const char *home_dir = getenv(HOME_ENV);
     
-    snprintf(config_path, sizeof(config_path), "%s/%s/%s", home_dir, CONFIG_DIR, CLIENT_ID_FILE);
+    snprintf(config_path, sizeof(config_path), "%s%s%s%s%s", home_dir, PATH_SEP, CONFIG_DIR, PATH_SEP, CLIENT_ID_FILE);
     
     FILE *file = fopen(config_path, "r");
     if (!file) {
@@ -283,7 +283,11 @@ int start_local_server(char *auth_code) {
     }
     
     // Set socket options
+#ifdef _WIN32
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, (const char *)&opt, sizeof(opt))) {
+#else
     if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
+#endif
         perror("setsockopt");
         close(server_fd);
         return -1;
@@ -664,9 +668,9 @@ int cdrive_auth_login(void) {
 
 int save_tokens(const OAuthTokens *tokens) {
     char token_path[MAX_PATH_SIZE];
-    const char *home_dir = getenv("HOME");
+    const char *home_dir = getenv(HOME_ENV);
     
-    snprintf(token_path, sizeof(token_path), "%s/%s/%s", home_dir, CONFIG_DIR, TOKEN_FILE);
+    snprintf(token_path, sizeof(token_path), "%s%s%s%s%s", home_dir, PATH_SEP, CONFIG_DIR, PATH_SEP, TOKEN_FILE);
     
     FILE *file = fopen(token_path, "w");
     if (!file) {
@@ -687,9 +691,9 @@ int save_tokens(const OAuthTokens *tokens) {
 
 int load_tokens(OAuthTokens *tokens) {
     char token_path[MAX_PATH_SIZE];
-    const char *home_dir = getenv("HOME");
+    const char *home_dir = getenv(HOME_ENV);
     
-    snprintf(token_path, sizeof(token_path), "%s/%s/%s", home_dir, CONFIG_DIR, TOKEN_FILE);
+    snprintf(token_path, sizeof(token_path), "%s%s%s%s%s", home_dir, PATH_SEP, CONFIG_DIR, PATH_SEP, TOKEN_FILE);
     
     FILE *file = fopen(token_path, "r");
     if (!file) {
