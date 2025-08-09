@@ -162,32 +162,48 @@ jobs:
     - name: Test basic functionality (Linux/macOS)
       if: "!startsWith(matrix.platform, 'windows') && steps.should_build.outputs.should_build == 'true'"
       run: |
-        ./cdrive --help || echo "Help command executed"
-        ./cdrive --version || echo "Version command executed"
+        if [ -f out/dist/cdrive ]; then
+          ./out/dist/cdrive --help || echo "Help command executed"
+          ./out/dist/cdrive --version || echo "Version command executed"
+        elif [ -f out/dist/cdrive-debug ]; then
+          ./out/dist/cdrive-debug --help || echo "Help command executed"
+          ./out/dist/cdrive-debug --version || echo "Version command executed"
+        else
+          echo "Binary not found in expected location"
+          ls -la out/dist/
+        fi
         
     - name: Test basic functionality (Windows)
       if: startsWith(matrix.platform, 'windows') && steps.should_build.outputs.should_build == 'true'
       shell: msys2 {0}
       run: |
-        ./cdrive.exe --help || echo "Help command executed"
-        ./cdrive.exe --version || echo "Version command executed"
+        if [ -f out/dist/cdrive.exe ]; then
+          ./out/dist/cdrive.exe --help || echo "Help command executed"
+          ./out/dist/cdrive.exe --version || echo "Version command executed"
+        elif [ -f out/dist/cdrive-debug.exe ]; then
+          ./out/dist/cdrive-debug.exe --help || echo "Help command executed"
+          ./out/dist/cdrive-debug.exe --version || echo "Version command executed"
+        else
+          echo "Binary not found in expected location"
+          ls -la out/dist/
+        fi
         
     - name: Create archive (Linux/macOS)
       if: "!startsWith(matrix.platform, 'windows') && steps.should_build.outputs.should_build == 'true'"
       run: |
         mkdir -p dist
-        cp cdrive dist/
+        cp out/dist/cdrive dist/ || cp out/dist/cdrive-debug dist/
         archive_name="cdrive-${{ matrix.platform }}${{ github.event.inputs.debug == 'true' && '-debug' || '' }}.tar.gz"
-        cd dist && tar -czf ../$archive_name cdrive
+        cd dist && tar -czf ../$archive_name cdrive*
         
     - name: Create archive (Windows)
       if: startsWith(matrix.platform, 'windows') && steps.should_build.outputs.should_build == 'true'
       shell: bash
       run: |
         mkdir -p dist
-        cp cdrive.exe dist/ || cp cdrive dist/cdrive.exe
+        cp out/dist/cdrive.exe dist/ || cp out/dist/cdrive-debug.exe dist/ || cp out/dist/cdrive dist/cdrive.exe
         archive_name="cdrive-${{ matrix.platform }}${{ github.event.inputs.debug == 'true' && '-debug' || '' }}.tar.gz"
-        cd dist && tar -czf ../$archive_name cdrive.exe
+        cd dist && tar -czf ../$archive_name cdrive*
         
     - name: Upload artifacts
       if: steps.should_build.outputs.should_build == 'true'
