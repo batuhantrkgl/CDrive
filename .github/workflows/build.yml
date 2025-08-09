@@ -5,11 +5,27 @@ on:
     branches: [ main, develop ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: 'Platforms to build (comma-separated: linux-x86_64,linux-i386,linux-arm64,linux-armhf,darwin-x86_64,darwin-arm64,windows-x86_64,windows-i386 or "all")'
+        required: false
+        default: 'all'
+        type: string
+      debug:
+        description: 'Enable debug build'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   build:
     name: Build on ${{ matrix.platform }}
     runs-on: ${{ matrix.os }}
+    if: |
+      github.event_name != 'workflow_dispatch' || 
+      github.event.inputs.platforms == 'all' || 
+      contains(github.event.inputs.platforms, matrix.platform)
     
     strategy:
       matrix:
@@ -87,44 +103,44 @@ jobs:
       if: matrix.platform == 'linux-x86_64'
       run: |
         make clean
-        make
+        ${{ github.event.inputs.debug == 'true' && 'make debug' || 'make' }}
         
     - name: Build (Linux i386)
       if: matrix.platform == 'linux-i386'
       run: |
         make clean
-        make CFLAGS="-m32" LDFLAGS="-m32"
+        ${{ github.event.inputs.debug == 'true' && 'make debug CFLAGS="-m32 -g -DDEBUG" LDFLAGS="-m32"' || 'make CFLAGS="-m32" LDFLAGS="-m32"' }}
         
     - name: Build (Linux ARM64)
       if: matrix.platform == 'linux-arm64'
       run: |
         make clean
-        make CC=aarch64-linux-gnu-gcc
+        ${{ github.event.inputs.debug == 'true' && 'make debug CC=aarch64-linux-gnu-gcc' || 'make CC=aarch64-linux-gnu-gcc' }}
         
     - name: Build (Linux ARMHF)
       if: matrix.platform == 'linux-armhf'
       run: |
         make clean
-        make CC=arm-linux-gnueabihf-gcc
+        ${{ github.event.inputs.debug == 'true' && 'make debug CC=arm-linux-gnueabihf-gcc' || 'make CC=arm-linux-gnueabihf-gcc' }}
         
     - name: Build (macOS x86_64)
       if: matrix.platform == 'darwin-x86_64'
       run: |
         make clean
-        make CFLAGS="-arch x86_64"
+        ${{ github.event.inputs.debug == 'true' && 'make debug CFLAGS="-arch x86_64 -g -DDEBUG"' || 'make CFLAGS="-arch x86_64"' }}
         
     - name: Build (macOS ARM64)
       if: matrix.platform == 'darwin-arm64'
       run: |
         make clean
-        make CFLAGS="-arch arm64"
+        ${{ github.event.inputs.debug == 'true' && 'make debug CFLAGS="-arch arm64 -g -DDEBUG"' || 'make CFLAGS="-arch arm64"' }}
         
     - name: Build (Windows)
       if: startsWith(matrix.platform, 'windows')
       shell: msys2 {0}
       run: |
         make clean
-        make
+        ${{ github.event.inputs.debug == 'true' && 'make debug' || 'make' }}
         
     - name: Test basic functionality (Linux/macOS)
       if: "!startsWith(matrix.platform, 'windows')"
@@ -144,7 +160,8 @@ jobs:
       run: |
         mkdir -p dist
         cp cdrive dist/
-        cd dist && tar -czf ../cdrive-${{ matrix.platform }}.tar.gz cdrive
+        archive_name="cdrive-${{ matrix.platform }}${{ github.event.inputs.debug == 'true' && '-debug' || '' }}.tar.gz"
+        cd dist && tar -czf ../$archive_name cdrive
         
     - name: Create archive (Windows)
       if: startsWith(matrix.platform, 'windows')
@@ -152,12 +169,13 @@ jobs:
       run: |
         mkdir -p dist
         cp cdrive.exe dist/ || cp cdrive dist/cdrive.exe
-        cd dist && tar -czf ../cdrive-${{ matrix.platform }}.tar.gz cdrive.exe
+        archive_name="cdrive-${{ matrix.platform }}${{ github.event.inputs.debug == 'true' && '-debug' || '' }}.tar.gz"
+        cd dist && tar -czf ../$archive_name cdrive.exe
         
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: cdrive-${{ matrix.platform }}
+        name: cdrive-${{ matrix.platform }}${{ github.event.inputs.debug == 'true' && '-debug' || '' }}
         path: cdrive-*.tar.gz
         retention-days: 30
 
@@ -181,6 +199,6 @@ jobs:
     - name: Upload combined artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: cdrive-all-platforms
+        name: cdrive-all-platforms${{ github.event.inputs.debug == 'true' && '-debug' || '' }}
         path: ./combined/*.tar.gz
         retention-days: 90
