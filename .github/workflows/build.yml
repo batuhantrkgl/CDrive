@@ -108,7 +108,7 @@ jobs:
       with:
         msystem: ${{ matrix.arch == 'i386' && 'MINGW32' || 'MINGW64' }}
         install: >-
-          ${{ matrix.arch == 'i386' && 'mingw-w64-i686-gcc mingw-w64-i686-make mingw-w64-i686-curl mingw-w64-i686-json-c' || 'mingw-w64-x86_64-gcc mingw-w64-x86_64-make mingw-w64-x86_64-curl mingw-w64-x86_64-json-c' }}
+          ${{ matrix.arch == 'i386' && 'mingw-w64-i686-gcc mingw-w64-i686-make mingw-w64-i686-curl mingw-w64-i686-json-c make' || 'mingw-w64-x86_64-gcc mingw-w64-x86_64-make mingw-w64-x86_64-curl mingw-w64-x86_64-json-c make' }}
       
     - name: Install dependencies (Linux/macOS)
       if: "!startsWith(matrix.platform, 'windows') && steps.should_build.outputs.should_build == 'true'"
