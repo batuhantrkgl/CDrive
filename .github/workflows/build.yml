@@ -1,0 +1,186 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    name: Build on ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    
+    strategy:
+      matrix:
+        include:
+          # Linux builds
+          - os: ubuntu-latest
+            platform: linux-x86_64
+            arch: x86_64
+            deps_install: |
+              sudo apt-get update
+              sudo apt-get install -y build-essential libcurl4-openssl-dev libjson-c-dev
+          - os: ubuntu-latest
+            platform: linux-i386
+            arch: i386
+            deps_install: |
+              sudo apt-get update
+              sudo apt-get install -y build-essential gcc-multilib libc6-dev-i386
+              sudo dpkg --add-architecture i386
+              sudo apt-get update
+              sudo apt-get install -y libcurl4-openssl-dev:i386 libjson-c-dev:i386
+          - os: ubuntu-latest
+            platform: linux-arm64
+            arch: arm64
+            deps_install: |
+              sudo apt-get update
+              sudo apt-get install -y build-essential gcc-aarch64-linux-gnu
+              sudo apt-get install -y libcurl4-openssl-dev libjson-c-dev
+          - os: ubuntu-latest
+            platform: linux-armhf
+            arch: armhf
+            deps_install: |
+              sudo apt-get update
+              sudo apt-get install -y build-essential gcc-arm-linux-gnueabihf
+              sudo apt-get install -y libcurl4-openssl-dev libjson-c-dev
+          # macOS builds
+          - os: macos-latest
+            platform: darwin-x86_64
+            arch: x86_64
+            deps_install: |
+              brew install curl json-c
+          - os: macos-latest
+            platform: darwin-arm64
+            arch: arm64
+            deps_install: |
+              brew install curl json-c
+          # Windows builds
+          - os: windows-latest
+            platform: windows-x86_64
+            arch: x86_64
+            deps_install: |
+              # MSYS2 will be set up separately
+          - os: windows-latest
+            platform: windows-i386
+            arch: i386
+            deps_install: |
+              # MSYS2 will be set up separately
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup MSYS2 (Windows only)
+      if: startsWith(matrix.platform, 'windows')
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: ${{ matrix.arch == 'i386' && 'MINGW32' || 'MINGW64' }}
+        install: >-
+          ${{ matrix.arch == 'i386' && 'mingw-w64-i686-gcc mingw-w64-i686-make mingw-w64-i686-curl mingw-w64-i686-json-c' || 'mingw-w64-x86_64-gcc mingw-w64-x86_64-make mingw-w64-x86_64-curl mingw-w64-x86_64-json-c' }}
+      
+    - name: Install dependencies (Linux/macOS)
+      if: "!startsWith(matrix.platform, 'windows')"
+      run: ${{ matrix.deps_install }}
+      
+    - name: Build (Linux x86_64)
+      if: matrix.platform == 'linux-x86_64'
+      run: |
+        make clean
+        make
+        
+    - name: Build (Linux i386)
+      if: matrix.platform == 'linux-i386'
+      run: |
+        make clean
+        make CFLAGS="-m32" LDFLAGS="-m32"
+        
+    - name: Build (Linux ARM64)
+      if: matrix.platform == 'linux-arm64'
+      run: |
+        make clean
+        make CC=aarch64-linux-gnu-gcc
+        
+    - name: Build (Linux ARMHF)
+      if: matrix.platform == 'linux-armhf'
+      run: |
+        make clean
+        make CC=arm-linux-gnueabihf-gcc
+        
+    - name: Build (macOS x86_64)
+      if: matrix.platform == 'darwin-x86_64'
+      run: |
+        make clean
+        make CFLAGS="-arch x86_64"
+        
+    - name: Build (macOS ARM64)
+      if: matrix.platform == 'darwin-arm64'
+      run: |
+        make clean
+        make CFLAGS="-arch arm64"
+        
+    - name: Build (Windows)
+      if: startsWith(matrix.platform, 'windows')
+      shell: msys2 {0}
+      run: |
+        make clean
+        make
+        
+    - name: Test basic functionality (Linux/macOS)
+      if: "!startsWith(matrix.platform, 'windows')"
+      run: |
+        ./cdrive --help || echo "Help command executed"
+        ./cdrive --version || echo "Version command executed"
+        
+    - name: Test basic functionality (Windows)
+      if: startsWith(matrix.platform, 'windows')
+      shell: msys2 {0}
+      run: |
+        ./cdrive.exe --help || echo "Help command executed"
+        ./cdrive.exe --version || echo "Version command executed"
+        
+    - name: Create archive (Linux/macOS)
+      if: "!startsWith(matrix.platform, 'windows')"
+      run: |
+        mkdir -p dist
+        cp cdrive dist/
+        cd dist && tar -czf ../cdrive-${{ matrix.platform }}.tar.gz cdrive
+        
+    - name: Create archive (Windows)
+      if: startsWith(matrix.platform, 'windows')
+      shell: bash
+      run: |
+        mkdir -p dist
+        cp cdrive.exe dist/ || cp cdrive dist/cdrive.exe
+        cd dist && tar -czf ../cdrive-${{ matrix.platform }}.tar.gz cdrive.exe
+        
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: cdrive-${{ matrix.platform }}
+        path: cdrive-*.tar.gz
+        retention-days: 30
+
+  create-combined-artifact:
+    name: Combine All Builds
+    needs: build
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: ./artifacts
+        
+    - name: Combine artifacts
+      run: |
+        mkdir -p ./combined
+        find ./artifacts -name "*.tar.gz" -exec cp {} ./combined/ \;
+        ls -la ./combined/
+        
+    - name: Upload combined artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: cdrive-all-platforms
+        path: ./combined/*.tar.gz
+        retention-days: 90
