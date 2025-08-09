@@ -82,6 +82,7 @@ jobs:
     steps:
     - name: Check if platform should be built
       id: should_build
+      shell: bash
       run: |
         if [[ "${{ github.event_name }}" != "workflow_dispatch" ]]; then
           echo "should_build=true" >> $GITHUB_OUTPUT
