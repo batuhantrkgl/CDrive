@@ -140,8 +140,8 @@ jobs:
         make clean
         export PKG_CONFIG_PATH="$(brew --prefix)/lib/pkgconfig:$PKG_CONFIG_PATH"
         CFLAGS="-arch x86_64 $(pkg-config --cflags libcurl json-c)"
-        LDFLAGS="-arch x86_64 $(pkg-config --libs libcurl json-c)"
-        ${{ github.event.inputs.debug == 'true' && 'make debug CFLAGS="$CFLAGS -g -DDEBUG" LDFLAGS="$LDFLAGS"' || 'make CFLAGS="$CFLAGS" LDFLAGS="$LDFLAGS"' }}
+        LIBS="$(pkg-config --libs libcurl json-c)"
+        ${{ github.event.inputs.debug == 'true' && 'make debug CFLAGS="$CFLAGS -g -DDEBUG" LIBS="$LIBS"' || 'make CFLAGS="$CFLAGS" LIBS="$LIBS"' }}
         
     - name: Build (macOS ARM64)
       if: matrix.platform == 'darwin-arm64' && steps.should_build.outputs.should_build == 'true'
@@ -149,8 +149,8 @@ jobs:
         make clean
         export PKG_CONFIG_PATH="$(brew --prefix)/lib/pkgconfig:$PKG_CONFIG_PATH"
         CFLAGS="-arch arm64 $(pkg-config --cflags libcurl json-c)"
-        LDFLAGS="-arch arm64 $(pkg-config --libs libcurl json-c)"
-        ${{ github.event.inputs.debug == 'true' && 'make debug CFLAGS="$CFLAGS -g -DDEBUG" LDFLAGS="$LDFLAGS"' || 'make CFLAGS="$CFLAGS" LDFLAGS="$LDFLAGS"' }}
+        LIBS="$(pkg-config --libs libcurl json-c)"
+        ${{ github.event.inputs.debug == 'true' && 'make debug CFLAGS="$CFLAGS -g -DDEBUG" LIBS="$LIBS"' || 'make CFLAGS="$CFLAGS" LIBS="$LIBS"' }}
         
     - name: Build (Windows)
       if: startsWith(matrix.platform, 'windows') && steps.should_build.outputs.should_build == 'true'
