@@ -22,10 +22,6 @@ jobs:
   build:
     name: Build on ${{ matrix.platform }}
     runs-on: ${{ matrix.os }}
-    if: |
-      github.event_name != 'workflow_dispatch' || 
-      github.event.inputs.platforms == 'all' || 
-      contains(github.event.inputs.platforms, matrix.platform)
     
     strategy:
       matrix:
@@ -84,11 +80,25 @@ jobs:
               # MSYS2 will be set up separately
     
     steps:
+    - name: Check if platform should be built
+      id: should_build
+      run: |
+        if [[ "${{ github.event_name }}" != "workflow_dispatch" ]]; then
+          echo "should_build=true" >> $GITHUB_OUTPUT
+        elif [[ "${{ github.event.inputs.platforms }}" == "all" ]]; then
+          echo "should_build=true" >> $GITHUB_OUTPUT
+        elif [[ "${{ github.event.inputs.platforms }}" == *"${{ matrix.platform }}"* ]]; then
+          echo "should_build=true" >> $GITHUB_OUTPUT
+        else
+          echo "should_build=false" >> $GITHUB_OUTPUT
+        fi
+        
     - name: Checkout code
+      if: steps.should_build.outputs.should_build == 'true'
       uses: actions/checkout@v4
       
     - name: Setup MSYS2 (Windows only)
-      if: startsWith(matrix.platform, 'windows')
+      if: startsWith(matrix.platform, 'windows') && steps.should_build.outputs.should_build == 'true'
       uses: msys2/setup-msys2@v2
       with:
         msystem: ${{ matrix.arch == 'i386' && 'MINGW32' || 'MINGW64' }}
@@ -96,67 +106,67 @@ jobs:
           ${{ matrix.arch == 'i386' && 'mingw-w64-i686-gcc mingw-w64-i686-make mingw-w64-i686-curl mingw-w64-i686-json-c' || 'mingw-w64-x86_64-gcc mingw-w64-x86_64-make mingw-w64-x86_64-curl mingw-w64-x86_64-json-c' }}
       
     - name: Install dependencies (Linux/macOS)
-      if: "!startsWith(matrix.platform, 'windows')"
+      if: "!startsWith(matrix.platform, 'windows') && steps.should_build.outputs.should_build == 'true'"
       run: ${{ matrix.deps_install }}
       
     - name: Build (Linux x86_64)
-      if: matrix.platform == 'linux-x86_64'
+      if: matrix.platform == 'linux-x86_64' && steps.should_build.outputs.should_build == 'true'
       run: |
         make clean
         ${{ github.event.inputs.debug == 'true' && 'make debug' || 'make' }}
         
     - name: Build (Linux i386)
-      if: matrix.platform == 'linux-i386'
+      if: matrix.platform == 'linux-i386' && steps.should_build.outputs.should_build == 'true'
       run: |
         make clean
         ${{ github.event.inputs.debug == 'true' && 'make debug CFLAGS="-m32 -g -DDEBUG" LDFLAGS="-m32"' || 'make CFLAGS="-m32" LDFLAGS="-m32"' }}
         
     - name: Build (Linux ARM64)
-      if: matrix.platform == 'linux-arm64'
+      if: matrix.platform == 'linux-arm64' && steps.should_build.outputs.should_build == 'true'
       run: |
         make clean
         ${{ github.event.inputs.debug == 'true' && 'make debug CC=aarch64-linux-gnu-gcc' || 'make CC=aarch64-linux-gnu-gcc' }}
         
     - name: Build (Linux ARMHF)
-      if: matrix.platform == 'linux-armhf'
+      if: matrix.platform == 'linux-armhf' && steps.should_build.outputs.should_build == 'true'
       run: |
         make clean
         ${{ github.event.inputs.debug == 'true' && 'make debug CC=arm-linux-gnueabihf-gcc' || 'make CC=arm-linux-gnueabihf-gcc' }}
         
     - name: Build (macOS x86_64)
-      if: matrix.platform == 'darwin-x86_64'
+      if: matrix.platform == 'darwin-x86_64' && steps.should_build.outputs.should_build == 'true'
       run: |
         make clean
         ${{ github.event.inputs.debug == 'true' && 'make debug CFLAGS="-arch x86_64 -g -DDEBUG"' || 'make CFLAGS="-arch x86_64"' }}
         
     - name: Build (macOS ARM64)
-      if: matrix.platform == 'darwin-arm64'
+      if: matrix.platform == 'darwin-arm64' && steps.should_build.outputs.should_build == 'true'
       run: |
         make clean
         ${{ github.event.inputs.debug == 'true' && 'make debug CFLAGS="-arch arm64 -g -DDEBUG"' || 'make CFLAGS="-arch arm64"' }}
         
     - name: Build (Windows)
-      if: startsWith(matrix.platform, 'windows')
+      if: startsWith(matrix.platform, 'windows') && steps.should_build.outputs.should_build == 'true'
       shell: msys2 {0}
       run: |
         make clean
         ${{ github.event.inputs.debug == 'true' && 'make debug' || 'make' }}
         
     - name: Test basic functionality (Linux/macOS)
-      if: "!startsWith(matrix.platform, 'windows')"
+      if: "!startsWith(matrix.platform, 'windows') && steps.should_build.outputs.should_build == 'true'"
       run: |
         ./cdrive --help || echo "Help command executed"
         ./cdrive --version || echo "Version command executed"
         
     - name: Test basic functionality (Windows)
-      if: startsWith(matrix.platform, 'windows')
+      if: startsWith(matrix.platform, 'windows') && steps.should_build.outputs.should_build == 'true'
       shell: msys2 {0}
       run: |
         ./cdrive.exe --help || echo "Help command executed"
         ./cdrive.exe --version || echo "Version command executed"
         
     - name: Create archive (Linux/macOS)
-      if: "!startsWith(matrix.platform, 'windows')"
+      if: "!startsWith(matrix.platform, 'windows') && steps.should_build.outputs.should_build == 'true'"
       run: |
         mkdir -p dist
         cp cdrive dist/
@@ -164,7 +174,7 @@ jobs:
         cd dist && tar -czf ../$archive_name cdrive
         
     - name: Create archive (Windows)
-      if: startsWith(matrix.platform, 'windows')
+      if: startsWith(matrix.platform, 'windows') && steps.should_build.outputs.should_build == 'true'
       shell: bash
       run: |
         mkdir -p dist
@@ -173,6 +183,7 @@ jobs:
         cd dist && tar -czf ../$archive_name cdrive.exe
         
     - name: Upload artifacts
+      if: steps.should_build.outputs.should_build == 'true'
       uses: actions/upload-artifact@v4
       with:
         name: cdrive-${{ matrix.platform }}${{ github.event.inputs.debug == 'true' && '-debug' || '' }}
