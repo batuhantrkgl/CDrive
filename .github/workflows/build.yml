@@ -179,7 +179,7 @@ jobs:
       shell: msys2 {0}
       run: |
         make clean
-        ${{ github.event.inputs.debug == 'true' && 'make debug' || 'make' }}
+        ${{ github.event.inputs.debug == 'true' && 'make debug LIBS="-lcurl -ljson-c -lws2_32"' || 'make LIBS="-lcurl -ljson-c -lws2_32"' }}
         
     - name: Test basic functionality (Linux/macOS)
       if: "!startsWith(matrix.platform, 'windows') && steps.should_build.outputs.should_build == 'true'"

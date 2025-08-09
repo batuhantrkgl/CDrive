@@ -1,24 +1,5 @@
 #define _GNU_SOURCE
 #include "cdrive.h"
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <termios.h>
-#include <unistd.h>
-#include <sys/wait.h>
-
-static struct termios orig_termios;
-
-void enable_raw_mode(void) {
-    tcgetattr(STDIN_FILENO, &orig_termios);
-    struct termios raw = orig_termios;
-    raw.c_lflag &= ~(ECHO | ICANON);
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
-}
-
-void disable_raw_mode(void) {
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
-}
 
 void clear_line(void) {
     printf("\r\033[K");
@@ -46,15 +27,15 @@ int show_interactive_menu(const char *question, const char **options, int num_op
             }
         }
         
-        key = getchar();
+        key = platform_getchar();
         
         // Move cursor back up
         move_cursor_up(num_options);
         
         switch (key) {
             case '\033': // Arrow keys
-                getchar(); // Skip [
-                switch (getchar()) {
+                platform_getchar(); // Skip [
+                switch (platform_getchar()) {
                     case 'A': // Up arrow
                         selected = (selected - 1 + num_options) % num_options;
                         break;
@@ -541,10 +522,36 @@ int cdrive_auth_login(void) {
     // Start local server to receive callback FIRST
     printf("🔧 Starting local server on port 8080...\n");
     
+    // Initialize socket subsystem
+    if (init_winsock() != 0) {
+        print_error("Failed to initialize network subsystem");
+        return -1;
+    }
+    
+#ifdef _WIN32
+    // Windows: Use simple synchronous approach (no fork)
+    // Open browser first
+    char open_cmd[1024];
+    snprintf(open_cmd, sizeof(open_cmd), "start \"\" \"%s\"", auth_url);
+    printf("🌐 Opening browser...\n");
+    int browser_result = system(open_cmd);
+    
+    if (browser_result != 0) {
+        print_warning("Could not automatically open browser. Please copy the URL above and paste it into your browser manually.");
+    }
+    
+    // Start server and wait for callback
+    int result = start_local_server(auth_code);
+    cleanup_winsock();
+    return result;
+    
+#else
+    // Unix/Linux: Use fork-based approach for concurrent server and browser
     // Create a pipe for IPC
     int pipefd[2];
     if (pipe(pipefd) == -1) {
         perror("pipe failed");
+        cleanup_winsock();
         return -1;
     }
     
@@ -571,8 +578,8 @@ int cdrive_auth_login(void) {
         
         // Open browser
         char open_cmd[1024];
-        snprintf(open_cmd, sizeof(open_cmd), "xdg-open \"%s\" 2>/dev/null || open \"%s\" 2>/dev/null || start \"%s\" 2>/dev/null", 
-                 auth_url, auth_url, auth_url);
+        snprintf(open_cmd, sizeof(open_cmd), "xdg-open \"%s\" 2>/dev/null || open \"%s\" 2>/dev/null", 
+                 auth_url, auth_url);
         printf("🌐 Opening browser...\n");
         int browser_result = system(open_cmd);
         
@@ -587,6 +594,7 @@ int cdrive_auth_login(void) {
         if (WEXITSTATUS(status) != 0) {
             print_error("Failed to receive authorization callback");
             close(pipefd[0]);
+            cleanup_winsock();
             return -1;
         }
         
@@ -596,6 +604,7 @@ int cdrive_auth_login(void) {
         
         if (bytes_read <= 0) {
             print_error("Failed to receive authorization code from server process");
+            cleanup_winsock();
             return -1;
         }
         
@@ -608,17 +617,21 @@ int cdrive_auth_login(void) {
         
         // Open browser
         char open_cmd[1024];
-        snprintf(open_cmd, sizeof(open_cmd), "xdg-open \"%s\" 2>/dev/null || open \"%s\" 2>/dev/null || start \"%s\" 2>/dev/null", 
-                 auth_url, auth_url, auth_url);
+        snprintf(open_cmd, sizeof(open_cmd), "xdg-open \"%s\" 2>/dev/null || open \"%s\" 2>/dev/null", 
+                 auth_url, auth_url);
         printf("🌐 Opening browser...\n");
         system(open_cmd);
         
         // Start local server to receive callback
         if (start_local_server(auth_code) != 0) {
             print_error("Failed to receive authorization callback");
+            cleanup_winsock();
             return -1;
         }
     }
+#endif
+    
+    cleanup_winsock();
     
     printf("Debug: auth_code received: '%.50s...'\n", auth_code);
     

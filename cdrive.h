@@ -6,9 +6,99 @@
 #include <string.h>
 #include <curl/curl.h>
 #include <json-c/json.h>
-#include <unistd.h>
-#include <sys/stat.h>
-#include <termios.h>
+
+// Platform-specific includes
+#ifdef _WIN32
+    #include <windows.h>
+    #include <winsock2.h>
+    #include <ws2tcpip.h>
+    #include <conio.h>
+    #include <direct.h>
+    #include <io.h>
+    #define mkdir(path, mode) _mkdir(path)
+    #define access(path, mode) _access(path, mode)
+    #define F_OK 0
+    #define PATH_SEP "\\"
+    #define HOME_ENV "USERPROFILE"
+    #define STDIN_FILENO 0
+    #define close(fd) closesocket(fd)
+    #define read(fd, buf, len) recv(fd, buf, len, 0)
+    #define write(fd, buf, len) send(fd, buf, len, 0)
+    typedef int socklen_t;
+    
+    // Initialize Winsock
+    static int init_winsock(void) {
+        WSADATA wsaData;
+        return WSAStartup(MAKEWORD(2,2), &wsaData);
+    }
+    
+    static void cleanup_winsock(void) {
+        WSACleanup();
+    }
+#else
+    #include <unistd.h>
+    #include <sys/stat.h>
+    #include <termios.h>
+    #include <sys/socket.h>
+    #include <netinet/in.h>
+    #include <arpa/inet.h>
+    #include <sys/wait.h>
+    #include <sys/types.h>
+    #define PATH_SEP "/"
+    #define HOME_ENV "HOME"
+    
+    static int init_winsock(void) { return 0; }
+    static void cleanup_winsock(void) { }
+#endif
+
+// Cross-platform terminal functions
+#ifdef _WIN32
+    // Windows console handle
+    static HANDLE hConsole = INVALID_HANDLE_VALUE;
+    static DWORD dwOriginalMode = 0;
+    
+    static void init_console(void) {
+        if (hConsole == INVALID_HANDLE_VALUE) {
+            hConsole = GetStdHandle(STD_INPUT_HANDLE);
+            GetConsoleMode(hConsole, &dwOriginalMode);
+        }
+    }
+    
+    static void enable_raw_mode(void) {
+        init_console();
+        DWORD dwMode = dwOriginalMode;
+        dwMode &= ~(ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT);
+        SetConsoleMode(hConsole, dwMode);
+    }
+    
+    static void disable_raw_mode(void) {
+        if (hConsole != INVALID_HANDLE_VALUE) {
+            SetConsoleMode(hConsole, dwOriginalMode);
+        }
+    }
+    
+    static int platform_getchar(void) {
+        return _getch();
+    }
+#else
+    // Unix/Linux termios functions
+    static struct termios orig_termios;
+    
+    static void enable_raw_mode(void) {
+        tcgetattr(STDIN_FILENO, &orig_termios);
+        struct termios raw = orig_termios;
+        raw.c_lflag &= ~(ECHO | ICANON);
+        tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+    }
+    
+    static void disable_raw_mode(void) {
+        tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
+    }
+    
+    static int platform_getchar(void) {
+        return getchar();
+    }
+#endif
 
 // Constants
 #define MAX_URL_SIZE 2048
