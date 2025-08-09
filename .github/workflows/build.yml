@@ -124,7 +124,11 @@ jobs:
       if: matrix.platform == 'linux-i386' && steps.should_build.outputs.should_build == 'true'
       run: |
         make clean
-        ${{ github.event.inputs.debug == 'true' && 'make debug CFLAGS="-m32 -g -DDEBUG" LDFLAGS="-m32"' || 'make CFLAGS="-m32" LDFLAGS="-m32"' }}
+        export PKG_CONFIG_PATH="/usr/lib/i386-linux-gnu/pkgconfig:$PKG_CONFIG_PATH"
+        export PKG_CONFIG_LIBDIR="/usr/lib/i386-linux-gnu/pkgconfig"
+        CFLAGS="-m32 $(pkg-config --cflags libcurl json-c)"
+        LIBS="$(pkg-config --libs libcurl json-c)"
+        ${{ github.event.inputs.debug == 'true' && 'make debug CFLAGS="$CFLAGS -g -DDEBUG" LIBS="$LIBS"' || 'make CFLAGS="$CFLAGS" LIBS="$LIBS"' }}
         
     - name: Build (Linux ARM64)
       if: matrix.platform == 'linux-arm64' && steps.should_build.outputs.should_build == 'true'
