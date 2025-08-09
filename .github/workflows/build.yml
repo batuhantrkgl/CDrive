@@ -139,14 +139,18 @@ jobs:
       run: |
         make clean
         export PKG_CONFIG_PATH="$(brew --prefix)/lib/pkgconfig:$PKG_CONFIG_PATH"
-        ${{ github.event.inputs.debug == 'true' && 'make debug CFLAGS="-arch x86_64 -g -DDEBUG $(pkg-config --cflags libcurl json-c)" LDFLAGS="-arch x86_64 $(pkg-config --libs libcurl json-c)"' || 'make CFLAGS="-arch x86_64 $(pkg-config --cflags libcurl json-c)" LDFLAGS="-arch x86_64 $(pkg-config --libs libcurl json-c)"' }}
+        CFLAGS="-arch x86_64 $(pkg-config --cflags libcurl json-c)"
+        LDFLAGS="-arch x86_64 $(pkg-config --libs libcurl json-c)"
+        ${{ github.event.inputs.debug == 'true' && 'make debug CFLAGS="$CFLAGS -g -DDEBUG" LDFLAGS="$LDFLAGS"' || 'make CFLAGS="$CFLAGS" LDFLAGS="$LDFLAGS"' }}
         
     - name: Build (macOS ARM64)
       if: matrix.platform == 'darwin-arm64' && steps.should_build.outputs.should_build == 'true'
       run: |
         make clean
         export PKG_CONFIG_PATH="$(brew --prefix)/lib/pkgconfig:$PKG_CONFIG_PATH"
-        ${{ github.event.inputs.debug == 'true' && 'make debug CFLAGS="-arch arm64 -g -DDEBUG $(pkg-config --cflags libcurl json-c)" LDFLAGS="-arch arm64 $(pkg-config --libs libcurl json-c)"' || 'make CFLAGS="-arch arm64 $(pkg-config --cflags libcurl json-c)" LDFLAGS="-arch arm64 $(pkg-config --libs libcurl json-c)"' }}
+        CFLAGS="-arch arm64 $(pkg-config --cflags libcurl json-c)"
+        LDFLAGS="-arch arm64 $(pkg-config --libs libcurl json-c)"
+        ${{ github.event.inputs.debug == 'true' && 'make debug CFLAGS="$CFLAGS -g -DDEBUG" LDFLAGS="$LDFLAGS"' || 'make CFLAGS="$CFLAGS" LDFLAGS="$LDFLAGS"' }}
         
     - name: Build (Windows)
       if: startsWith(matrix.platform, 'windows') && steps.should_build.outputs.should_build == 'true'
