@@ -18,7 +18,7 @@ HOST_ARCH := $(shell uname -m)
 CC = gcc
 CFLAGS = -Wall -Wextra -std=c99 -O2
 DEBUG_CFLAGS = -Wall -Wextra -std=c99 -g -DDEBUG
-LIBS = -lcurl -ljson-c
+LIBS ?= -lcurl -ljson-c
 
 # Target platforms for cross-compilation
 TARGETS = \
