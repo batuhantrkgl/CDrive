@@ -214,37 +214,59 @@ CDrive stores its configuration in `~/.cdrive/`:
 
 ## Building from Source
 
-### Basic Build
+### Quick Start
 ```bash
 git clone https://github.com/batuhantrkgl/CDrive.git
 cd CDrive
-make
+make deps    # Check dependencies
+make         # Build for current platform
 ```
 
-### Debug Build
+### Build Options
+
+#### Standard Build
 ```bash
-make debug
+make                 # Build for host system
+make debug          # Build with debug symbols
+make clean          # Clean build artifacts
 ```
 
-### Install System-wide
+#### Advanced Build with Custom Flags
 ```bash
-sudo make install
+# Custom compiler and flags
+CC=clang CFLAGS="-O3 -march=native" make
+
+# Custom library paths (useful for cross-compilation)
+LIBS="$(pkg-config --libs libcurl json-c)" make
+
+# 32-bit build on 64-bit system
+CC="gcc -m32" CFLAGS="-m32 -O2" LIBS="-lcurl -ljson-c" make
 ```
 
-### Clean Build Files
+#### System Integration
 ```bash
-make clean
+sudo make install   # Install to /usr/local/bin
+sudo make uninstall # Remove from system
+make test           # Test the built binary
+```
+
+#### Utility Commands
+```bash
+make info           # Show build configuration
+make deps           # Check dependencies
+make check-cross    # Check cross-compilation tools
+make help           # Show all available targets
 ```
 
 ## Cross-Platform Building
 
-CDrive supports cross-compilation for multiple platforms:
+CDrive supports cross-compilation for multiple platforms with automatic toolchain detection and pkg-config integration.
 
 ### Available Targets
 - `linux-x86_64` - Linux 64-bit (default, always available)
 - `linux-i386` - Linux 32-bit (requires multilib support)
 - `linux-arm64` - Linux ARM 64-bit (requires cross-compiler)
-- `linux-armv7` - Linux ARM 32-bit (requires cross-compiler)
+- `linux-armhf` - Linux ARM with hardware floating point (requires cross-compiler)
 - `windows-x86_64` - Windows 64-bit (requires MinGW)
 - `windows-i386` - Windows 32-bit (requires MinGW)
 - `darwin-x86_64` - macOS Intel (requires OSXCross)
@@ -252,99 +274,198 @@ CDrive supports cross-compilation for multiple platforms:
 
 **Note**: Targets without required toolchains will be automatically skipped with a warning message.
 
-### Build Commands
+### Cross-Compilation Commands
 
+#### Basic Cross-Compilation
 ```bash
-# Build for specific platform
-make TARGET=linux-x86_64
+# Build for specific platforms (using cross-compilation targets)
+make linux-i386        # 32-bit Linux
+make linux-arm64       # ARM64 Linux
+make windows-x86_64     # 64-bit Windows
 
-# Build all platforms
-make all-platforms
+# Build all available platforms
+make cross-all
 
-# Create distribution packages
-make dist
-
-# Build and package everything
+# Create release packages for all platforms
 make release
 ```
 
-### Cross-Compilation Requirements
+#### Advanced Build with Custom Settings
+The build system supports conditional variable assignment, allowing you to override compiler, flags, and libraries:
+
+```bash
+# Custom compiler and optimization
+CC=clang CFLAGS="-O3 -march=native" make
+
+# Cross-compilation with pkg-config (automated in CI/CD)
+CC="gcc -m32" \
+CFLAGS="-m32 $(pkg-config --cflags libcurl json-c)" \
+LIBS="$(pkg-config --libs libcurl json-c)" make
+
+# ARM cross-compilation
+CC=aarch64-linux-gnu-gcc \
+CFLAGS="$(pkg-config --cflags libcurl json-c)" \
+LIBS="$(pkg-config --libs libcurl json-c)" make
+```
+
+### Cross-Compilation Setup
 
 For cross-compilation, you'll need the appropriate toolchains:
 
-#### 32-bit Support (from 64-bit Linux)
+#### 32-bit Support (i386 from x86_64 Linux)
 ```bash
-# Ubuntu/Debian
-sudo apt install gcc-multilib libc6-dev-i386
-sudo apt install libcurl4-openssl-dev:i386 libjson-c-dev:i386
+# Ubuntu/Debian - comprehensive setup
+sudo apt-get update
+sudo apt-get install -y build-essential gcc-multilib libc6-dev-i386
+sudo dpkg --add-architecture i386
+sudo apt-get update
+sudo apt-get install -y libcurl4-openssl-dev:i386 libjson-c-dev:i386
 
 # Fedora/RHEL/CentOS
 sudo dnf install glibc-devel.i686 libgcc.i686
 sudo dnf install libcurl-devel.i686 json-c-devel.i686
 ```
 
-#### Windows (from Linux)
+#### ARM Support (ARM64/ARMHF)
 ```bash
 # Ubuntu/Debian
-sudo apt install gcc-mingw-w64 mingw-w64-tools
-
-# Fedora
-sudo dnf install mingw64-gcc mingw32-gcc
-```
-
-#### ARM (from x86_64)
-```bash
-# Ubuntu/Debian
-sudo apt install gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf
+sudo apt-get install gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf
+sudo dpkg --add-architecture arm64 armhf
+sudo apt-get update
+sudo apt-get install libcurl4-openssl-dev:arm64 libjson-c-dev:arm64
+sudo apt-get install libcurl4-openssl-dev:armhf libjson-c-dev:armhf
 
 # Fedora
 sudo dnf install gcc-aarch64-linux-gnu gcc-arm-linux-gnu
 ```
 
-#### macOS Cross-Compilation
+#### Windows Cross-Compilation (from Linux)
+```bash
+# Ubuntu/Debian
+sudo apt-get install gcc-mingw-w64 mingw-w64-tools
+
+# Fedora
+sudo dnf install mingw64-gcc mingw32-gcc
+```
+
+#### macOS Cross-Compilation (Advanced)
 ```bash
 # Requires OSXCross (complex setup)
 # See: https://github.com/tpoechtrager/osxcross
-# Note: macOS targets are rarely needed and require Apple SDK
+# Note: Requires Apple SDK and is mainly for CI/CD environments
 ```
 
-**Note**: Some targets may not be available on all systems. If a cross-compilation target fails, ensure you have the required toolchain and development libraries installed for that architecture.
+### Build System Features
+
+#### Automatic Toolchain Detection
+The build system automatically detects available cross-compilers and skips unavailable targets:
+
+```bash
+make check-cross  # Check available cross-compilation tools
+```
+
+#### pkg-config Integration
+The build system uses pkg-config to automatically find correct library paths for cross-compilation, avoiding hardcoded paths and improving compatibility across different Linux distributions.
+
+#### Conditional Variable Assignment
+All major build variables use conditional assignment (`?=`), allowing easy customization:
+
+```bash
+# Override any build variable
+CC=clang make                    # Use Clang instead of GCC
+CFLAGS="-O3 -flto" make         # Custom optimization flags
+LIBS="$(pkg-config --libs libcurl json-c)" make  # Custom library paths
+```
 
 ### Troubleshooting Cross-Compilation
 
-**32-bit compilation fails with "unrecognized command-line option '-m32'":**
+#### 32-bit Compilation Issues
+**Error: "unrecognized command-line option '-m32'"**
 ```bash
 # Ubuntu/Debian
-sudo apt install gcc-multilib libc6-dev-i386
+sudo apt-get install gcc-multilib libc6-dev-i386
+**Error: "cannot find -lcurl" or "cannot find -ljson-c"**
+```bash
+# For i386 builds, ensure i386 libraries are installed
 sudo dpkg --add-architecture i386
-sudo apt update
-sudo apt install libcurl4-openssl-dev:i386 libjson-c-dev:i386
+sudo apt-get update
+sudo apt-get install libcurl4-openssl-dev:i386 libjson-c-dev:i386
 
-# Fedora/RHEL/CentOS
-sudo dnf install glibc-devel.i686 libgcc.i686
-sudo dnf install libcurl-devel.i686 json-c-devel.i686
+# Use pkg-config for correct library paths
+PKG_CONFIG_PATH="/usr/lib/i386-linux-gnu/pkgconfig" \
+CC="gcc -m32" CFLAGS="-m32" \
+LIBS="$(pkg-config --libs libcurl json-c)" make
 ```
 
-**Skip failed targets and continue:**
+#### Library Path Issues
+**Error: "Package 'libcurl' was not found" during cross-compilation**
 ```bash
-# Build only specific working targets
-make TARGET=linux-x86_64
-make TARGET=windows-x86_64
+# Set correct pkg-config path for target architecture
+export PKG_CONFIG_PATH="/usr/lib/arm-linux-gnueabihf/pkgconfig"
+export PKG_CONFIG_LIBDIR="/usr/lib/arm-linux-gnueabihf/pkgconfig"
+
+# Verify libraries are found
+pkg-config --exists libcurl json-c && echo "Libraries found" || echo "Libraries missing"
+```
+
+#### Build Target Issues
+**Some cross-compilation targets fail:**
+```bash
+# Check available cross-compilers
+make check-cross
+
+# Build only available targets
+make linux-x86_64    # Always works (native)
+make linux-i386      # If multilib installed
 
 # The build system automatically skips unavailable targets
 # Example output: "Warning: Cross-compiler not found, skipping target"
 ```
 
-**Common cross-compiler package names:**
+#### Quick Cross-Compilation Reference
 ```bash
-# For ARM support
-sudo apt install gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf  # Ubuntu/Debian
-sudo dnf install gcc-aarch64-linux-gnu gcc-arm-linux-gnu        # Fedora
+# Check what's available
+make info            # Show build configuration
+make check-cross     # List available cross-compilers
+make deps           # Verify dependencies
 
-# For Windows support  
-sudo apt install gcc-mingw-w64                                  # Ubuntu/Debian
-sudo dnf install mingw64-gcc mingw32-gcc                        # Fedora
+# Common working combinations
+make                # Native build (always works)
+make cross-all      # Build all available targets
+make release        # Create distribution packages
+
+# Manual cross-compilation with custom settings
+CC="gcc -m32" CFLAGS="-m32" LIBS="-lcurl -ljson-c" make  # i386
+CC="aarch64-linux-gnu-gcc" make linux-arm64             # ARM64
 ```
+
+The build system is designed to be robust and will automatically skip targets that can't be built, so you can safely run `make cross-all` even if not all cross-compilers are installed.
+
+### Automated Builds (GitHub Actions)
+
+CDrive includes a comprehensive CI/CD pipeline that automatically builds for all supported platforms:
+
+#### Supported CI/CD Platforms
+- **Linux**: x86_64, i386, ARM64, ARMHF
+- **Windows**: x86_64, i386  
+- **macOS**: x86_64 (Intel), ARM64 (Apple Silicon)
+
+#### Features
+- **Automatic builds** on every push to the repository
+- **Manual trigger support** for on-demand builds
+- **pkg-config integration** for correct cross-compilation library paths
+- **Platform-specific optimizations** and dependency management
+- **Artifact generation** for easy distribution
+
+#### Triggering Manual Builds
+You can manually trigger builds from the GitHub Actions tab with optional debug mode:
+
+```yaml
+# The workflow supports manual dispatch with debug option
+# Available in GitHub repository → Actions → Build Multi-Platform → Run workflow
+```
+
+The CI/CD system uses the same Makefile and build logic as local development, ensuring consistency between local and automated builds.
 
 ## Output Features
 
