@@ -134,7 +134,7 @@ jobs:
         export PKG_CONFIG_LIBDIR="/usr/lib/i386-linux-gnu/pkgconfig"
         CFLAGS="-m32 $(pkg-config --cflags libcurl json-c)"
         LIBS="$(pkg-config --libs libcurl json-c)"
-        ${{ github.event.inputs.debug == 'true' && 'make debug CFLAGS="$CFLAGS -g -DDEBUG" LIBS="$LIBS"' || 'make CFLAGS="$CFLAGS" LIBS="$LIBS"' }}
+        ${{ github.event.inputs.debug == 'true' && 'make debug CC="gcc -m32" CFLAGS="$CFLAGS -g -DDEBUG" LIBS="$LIBS"' || 'make CC="gcc -m32" CFLAGS="$CFLAGS" LIBS="$LIBS"' }}
         
     - name: Build (Linux ARM64)
       if: matrix.platform == 'linux-arm64' && steps.should_build.outputs.should_build == 'true'

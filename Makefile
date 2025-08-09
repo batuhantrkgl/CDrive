@@ -15,8 +15,8 @@ HOST_OS := $(shell uname -s)
 HOST_ARCH := $(shell uname -m)
 
 # Compiler and flags
-CC = gcc
-CFLAGS = -Wall -Wextra -std=c99 -O2
+CC ?= gcc
+CFLAGS ?= -Wall -Wextra -std=c99 -O2
 DEBUG_CFLAGS = -Wall -Wextra -std=c99 -g -DDEBUG
 LIBS ?= -lcurl -ljson-c
 
