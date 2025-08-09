@@ -1,0 +1,24 @@
+# Build artifacts
+out/
+*.o
+*.exe
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Configuration files (keep as examples but ignore user configs)
+# client_id.json
+# tokens.json
+
+# Logs
+*.log
+
+# Temporary files
+*~
+*.tmp
+*.swp

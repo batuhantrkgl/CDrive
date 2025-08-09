@@ -541,9 +541,11 @@ int cdrive_auth_login(void) {
     }
     
     // Start server and wait for callback
-    int result = start_local_server(auth_code);
-    cleanup_winsock();
-    return result;
+    if (start_local_server(auth_code) != 0) {
+        print_error("Failed to receive authorization callback");
+        cleanup_winsock();
+        return -1;
+    }
     
 #else
     // Unix/Linux: Use fork-based approach for concurrent server and browser

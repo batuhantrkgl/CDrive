@@ -1,8 +1,5 @@
 #define _GNU_SOURCE
 #include "cdrive.h"
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
 
 // Global variables
 ClientCredentials g_client_creds;
