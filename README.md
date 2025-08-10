@@ -1,7 +1,7 @@
 # CDrive - A Cross-Platform Google Drive CLI Written in C
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.0.0-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-[+] -green.svg)](CHANGELOG.md)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS-lightgrey.svg)](#installation)
 
 A professional, lightweight command-line interface for Google Drive written in C. CDrive provides fast, efficient file operations with Google Drive using minimal system resources.
