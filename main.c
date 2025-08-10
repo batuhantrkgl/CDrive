@@ -40,7 +40,15 @@ int main(int argc, char *argv[]) {
                 printf("\n");
                 print_success("Authentication complete.");
                 print_success("Configured Google Drive access");
-                print_success("Logged in to Google Drive");
+                
+                // Get user info and display personalized message
+                char user_name[256] = {0};
+                if (get_user_info(user_name, sizeof(user_name)) == 0) {
+                    printf("%s[+]%s Logged in as %s%s%s on Google Drive.\n", 
+                           COLOR_GREEN, COLOR_RESET, COLOR_BOLD, user_name, COLOR_RESET);
+                } else {
+                    print_success("Logged in to Google Drive");
+                }
             } else {
                 print_error("Authentication failed. Please try again.");
                 curl_global_cleanup();
@@ -84,7 +92,8 @@ int main(int argc, char *argv[]) {
         }
     } else if (strcmp(argv[1], "list") == 0) {
         const char *folder_id = (argc > 2) ? argv[2] : "root";
-        printf("📁 Listing files in folder: %s\n", folder_id);
+        print_colored("[>] ", COLOR_BLUE);
+        printf("Listing files in folder: %s\n", folder_id);
         cdrive_list_files(folder_id);
     } else if (strcmp(argv[1], "mkdir") == 0) {
         if (argc < 3) {
@@ -96,7 +105,8 @@ int main(int argc, char *argv[]) {
         const char *folder_name = argv[2];
         const char *parent_id = (argc > 3) ? argv[3] : "root";
         
-        printf("📁 Creating folder '%s'...\n", folder_name);
+        print_colored("[>] ", COLOR_BLUE);
+        printf("Creating folder '%s'...\n", folder_name);
         if (cdrive_create_folder(folder_name, parent_id) == 0) {
             print_success("Folder created successfully!");
         } else {
@@ -105,7 +115,133 @@ int main(int argc, char *argv[]) {
             return 1;
         }
     } else if (strcmp(argv[1], "version") == 0 || strcmp(argv[1], "--version") == 0) {
-        print_version();
+        print_version_with_update_check();
+    } else if (strcmp(argv[1], "update") == 0) {
+        if (argc < 3) {
+            print_colored("Usage: ", COLOR_BOLD);
+            printf("%s update <option>\n\n", argv[0]);
+            print_colored("UPDATE OPTIONS\n", COLOR_BOLD);
+            printf("  --auto     Download and install pre-compiled binary automatically\n");
+            printf("  --compile  Download source and compile on your machine\n");
+            printf("  --check    Check for updates without installing\n");
+            curl_global_cleanup();
+            return 1;
+        }
+        
+        if (strcmp(argv[2], "--check") == 0) {
+            printf("\n");
+            print_colored("[*] ", COLOR_YELLOW);
+            printf("Forcing update check (bypassing cache)...\n");
+            
+            UpdateInfo update_info = {0};
+            int update_result = force_check_for_updates(&update_info);
+            
+            if (update_result == 0) {
+                if (update_info.is_newer) {
+                    printf("\n");
+                    print_colored("[+] ", COLOR_GREEN);
+                    print_colored("Update Available! ", COLOR_BOLD);
+                    printf("Version %s", update_info.version);
+                    if (strlen(update_info.release_date) > 0) {
+                        printf(" (%s)", update_info.release_date);
+                    }
+                    printf("\n");
+                    
+                    print_colored("[*] ", COLOR_CYAN);
+                    printf("Run ");
+                    print_colored("cdrive update --auto", COLOR_YELLOW);
+                    printf(" to install pre-compiled binary\n");
+                    
+                    print_colored("[*] ", COLOR_CYAN);
+                    printf("Or run ");
+                    print_colored("cdrive update --compile", COLOR_YELLOW);
+                    printf(" to automatically compile it on your machine\n");
+                } else {
+                    printf("\n");
+                    print_colored("[+] ", COLOR_GREEN);
+                    printf("You're running the latest version!\n");
+                }
+            } else if (update_result == -2) {
+                printf("\n");
+                print_colored("[!] ", COLOR_YELLOW);
+                printf("GitHub API rate limit exceeded. Try again later.\n");
+            } else if (update_result == -3) {
+                printf("\n");
+                print_colored("[!] ", COLOR_RED);
+                printf("Repository not found or releases not available.\n");
+            } else {
+                printf("\n");
+                print_colored("[!] ", COLOR_YELLOW);
+                printf("Could not check for updates. Please check your internet connection.\n");
+            }
+        } else if (strcmp(argv[2], "--auto") == 0) {
+            printf("\n");
+            print_colored("[*] ", COLOR_YELLOW);
+            printf("Checking for updates...\n");
+            
+            UpdateInfo update_info = {0};
+            if (force_check_for_updates(&update_info) == 0) {
+                if (update_info.is_newer) {
+                    printf("\n");
+                    print_colored("[+] ", COLOR_GREEN);
+                    printf("Update available: %s -> %s\n", CDRIVE_VERSION, update_info.version);
+                    
+                    if (download_and_install_update(&update_info, 1) == 0) {
+                        printf("\n");
+                        print_success("Update completed successfully!");
+                    } else {
+                        print_error("Update installation failed");
+                        curl_global_cleanup();
+                        return 1;
+                    }
+                } else {
+                    printf("\n");
+                    print_success("You're already running the latest version!");
+                }
+            } else {
+                print_error("Failed to check for updates");
+                curl_global_cleanup();
+                return 1;
+            }
+        } else if (strcmp(argv[2], "--compile") == 0) {
+            printf("\n");
+            print_colored("[*] ", COLOR_YELLOW);
+            printf("Checking for updates...\n");
+            
+            UpdateInfo update_info = {0};
+            if (force_check_for_updates(&update_info) == 0) {
+                if (update_info.is_newer) {
+                    printf("\n");
+                    print_colored("[+] ", COLOR_GREEN);
+                    printf("Update available: %s -> %s\n", CDRIVE_VERSION, update_info.version);
+                    
+                    print_colored("[*] ", COLOR_CYAN);
+                    printf("To compile from source:\n");
+                    printf("1. git clone https://github.com/batuhantrkgl/CDrive.git\n");
+                    printf("2. cd CDrive\n");
+                    printf("3. git checkout %s\n", update_info.tag_name);
+                    printf("4. make clean && make\n");
+                    printf("5. sudo make install\n\n");
+                    
+                    print_colored("[*] ", COLOR_BLUE);
+                    printf("Or download source archive:\n");
+                    printf("   %s/archive/%s.tar.gz\n", 
+                           GITHUB_RELEASES_URL, update_info.tag_name);
+                } else {
+                    printf("\n");
+                    print_success("You're already running the latest version!");
+                }
+            } else {
+                print_error("Failed to check for updates");
+                curl_global_cleanup();
+                return 1;
+            }
+        } else {
+            print_error("Unknown update option");
+            printf("Run 'cdrive update --help' for usage.\n");
+            curl_global_cleanup();
+            return 1;
+        }
     } else if (strcmp(argv[1], "help") == 0 || strcmp(argv[1], "--help") == 0) {
         print_usage();
     } else {
@@ -124,7 +260,7 @@ void print_usage(void) {
     print_colored(" - Professional Google Drive CLI\n\n", COLOR_RESET);
     
     print_colored("USAGE\n", COLOR_BOLD);
-    printf("  cdrive <command> [flags]\n\n");
+    printf("  cdrive <command> <subcommand> [flags]\n\n");
     
     print_colored("CORE COMMANDS\n", COLOR_BOLD);
     printf("  auth        Authenticate with Google Drive\n");
@@ -134,7 +270,8 @@ void print_usage(void) {
     
     print_colored("ADDITIONAL COMMANDS\n", COLOR_BOLD);
     printf("  help        Show help for cdrive\n");
-    printf("  version     Show cdrive version\n\n");
+    printf("  version     Show cdrive version and check for updates\n");
+    printf("  update      Update cdrive to the latest version\n\n");
     
     print_colored("AUTHENTICATION COMMANDS\n", COLOR_BOLD);
     printf("  auth login  Authenticate with Google Drive\n");
@@ -154,13 +291,4 @@ void print_usage(void) {
     
     print_colored("LEARN MORE\n", COLOR_BOLD);
     printf("  Use 'cdrive <command> --help' for more information about a command.\n");
-}
-
-void print_version(void) {
-    print_colored("cdrive", COLOR_BOLD);
-    printf(" version ");
-    print_colored("1.0.0", COLOR_GREEN);
-    printf("\n");
-    printf("A professional Google Drive command-line interface\n");
-    printf("Built with libcurl and json-c\n");
 }

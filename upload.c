@@ -32,6 +32,11 @@ char *get_file_mime_type(const char *filename) {
 struct ProgressData {
     double last_percentage;
     char filename[256];
+    struct timespec start_time;
+    curl_off_t last_bytes;
+    LoadingSpinner *spinner;
+    int spinner_active;
+    int spinner_frame;
 };
 
 int progress_callback(void *clientp, curl_off_t dltotal, curl_off_t dlnow, curl_off_t ultotal, curl_off_t ulnow) {
@@ -43,13 +48,88 @@ int progress_callback(void *clientp, curl_off_t dltotal, curl_off_t dlnow, curl_
     if (ultotal > 0) {
         double percentage = (double)ulnow / ultotal * 100.0;
         
-        // Only update every 25% to be minimal, and always show 100%
-        if ((percentage >= 25.0 && progress->last_percentage < 25.0) ||
-            (percentage >= 50.0 && progress->last_percentage < 50.0) ||
-            (percentage >= 75.0 && progress->last_percentage < 75.0) ||
-            (percentage >= 100.0 && progress->last_percentage < 100.0)) {
-            printf("\ruploading... %.0f%%", percentage);
-            fflush(stdout);
+        // Initialize start time on first call
+        if (progress->start_time.tv_sec == 0 && progress->start_time.tv_nsec == 0) {
+            clock_gettime(CLOCK_MONOTONIC, &progress->start_time);
+            progress->last_bytes = ulnow;
+        }
+        
+        // Update more frequently for real-time display (every 0.1% change or every 100ms)
+        struct timespec current_time;
+        clock_gettime(CLOCK_MONOTONIC, &current_time);
+        
+        // Calculate elapsed time in milliseconds
+        double elapsed_ms = (current_time.tv_sec - progress->start_time.tv_sec) * 1000.0 + 
+                           (current_time.tv_nsec - progress->start_time.tv_nsec) / 1000000.0;
+        
+        // Spinner characters for manual rotation
+        const char* spinner_chars[] = {"|", "/", "-", "\\", "|", "/", "-", "\\", "|", "/"};
+        const int spinner_count = 10;
+        
+        // Update if percentage changed by 0.1% or if 100ms have passed
+        if (fabs(percentage - progress->last_percentage) >= 0.1 || elapsed_ms >= 100) {
+            // Rotate spinner frame
+            progress->spinner_frame = (progress->spinner_frame + 1) % spinner_count;
+            
+            if (percentage >= 100.0) {
+                // Stop spinner before showing completion (only once)
+                if (progress->spinner_active) {
+                    progress->spinner_active = 0;
+                    
+                    printf("\r\033[K");
+                    print_colored("[+] ", COLOR_GREEN);
+                    print_colored("Uploading... ", COLOR_BLUE);
+                    printf("%.1f%% ", percentage);
+                    print_colored("(completed)", COLOR_GREEN);
+                    fflush(stdout);
+                }
+            } else if (elapsed_ms > 500 && ulnow > 0) { // Wait 500ms before showing ETA
+                // Calculate ETA based on current upload speed
+                double speed = (double)ulnow / (elapsed_ms / 1000.0); // bytes per second
+                double remaining_bytes = ultotal - ulnow;
+                double eta_seconds = remaining_bytes / speed;
+                
+                // Clear line completely and show progress with manual spinner
+                printf("\r\033[K%s ", spinner_chars[progress->spinner_frame]);
+                print_colored("Uploading... ", COLOR_BLUE);
+                printf("%.1f%% ", percentage);
+                print_colored("(ETA: ", COLOR_CYAN);
+                
+                if (eta_seconds < 60) {
+                    // Show seconds only for short durations
+                    int seconds = (int)eta_seconds;
+                    printf(COLOR_YELLOW "%ds" COLOR_RESET, seconds);
+                } else if (eta_seconds < 3600) {
+                    // Show minutes and seconds (XXm XXs)
+                    int minutes = (int)(eta_seconds / 60);
+                    int seconds = (int)(eta_seconds - minutes * 60);
+                    printf(COLOR_YELLOW "%dm %ds" COLOR_RESET, minutes, seconds);
+                } else if (eta_seconds < 86400) {
+                    // Show hours, minutes, and seconds (XXh XXm XXs)
+                    int hours = (int)(eta_seconds / 3600);
+                    int minutes = (int)((eta_seconds - hours * 3600) / 60);
+                    int seconds = (int)(eta_seconds - hours * 3600 - minutes * 60);
+                    printf(COLOR_YELLOW "%dh %dm %ds" COLOR_RESET, hours, minutes, seconds);
+                } else {
+                    // Show days, hours, and minutes (XXd XXh XXm)
+                    int days = (int)(eta_seconds / 86400);
+                    int hours = (int)((eta_seconds - days * 86400) / 3600);
+                    int minutes = (int)((eta_seconds - days * 86400 - hours * 3600) / 60);
+                    printf(COLOR_YELLOW "%dd %dh %dm" COLOR_RESET, days, hours, minutes);
+                }
+                print_colored(")", COLOR_CYAN);
+                fflush(stdout);
+                progress->spinner_active = 1;
+            } else {
+                // Clear line completely and show progress with manual spinner
+                printf("\r\033[K%s ", spinner_chars[progress->spinner_frame]);
+                print_colored("Uploading... ", COLOR_BLUE);
+                printf("%.1f%% ", percentage);
+                print_colored("(calculating...)", COLOR_MAGENTA);
+                fflush(stdout);
+                progress->spinner_active = 1;
+            }
+            
             progress->last_percentage = percentage;
         }
     }
@@ -63,9 +143,13 @@ int cdrive_upload(const char *source_path, const char *target_folder) {
     struct curl_httppost *formpost = NULL;
     struct curl_httppost *lastptr = NULL;
     APIResponse response = {0};
+    LoadingSpinner setup_spinner = {0};
+    
+    start_spinner(&setup_spinner, "Preparing upload...");
     
     // Load tokens
     if (load_tokens(&g_tokens) != 0) {
+        stop_spinner(&setup_spinner);
         print_error("Not authenticated. Run 'cdrive auth login' first.");
         return -1;
     }
@@ -73,6 +157,7 @@ int cdrive_upload(const char *source_path, const char *target_folder) {
     // Check if file exists and get file size
     FILE *file = fopen(source_path, "rb");
     if (!file) {
+        stop_spinner(&setup_spinner);
         print_error("File not found or cannot be opened");
         return -1;
     }
@@ -84,6 +169,7 @@ int cdrive_upload(const char *source_path, const char *target_folder) {
     
     curl = curl_easy_init();
     if (!curl) {
+        stop_spinner(&setup_spinner);
         print_error("Error initializing curl");
         return -1;
     }
@@ -131,7 +217,9 @@ int cdrive_upload(const char *source_path, const char *target_folder) {
     
     // Set up progress tracking
     struct ProgressData progress_data = {0};
+    LoadingSpinner upload_spinner = {0};
     strncpy(progress_data.filename, filename, sizeof(progress_data.filename) - 1);
+    progress_data.spinner = &upload_spinner;
     
     // Configure curl options
     curl_easy_setopt(curl, CURLOPT_URL, "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart");
@@ -142,6 +230,13 @@ int cdrive_upload(const char *source_path, const char *target_folder) {
     curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
     curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, progress_callback);
     curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &progress_data);
+    
+    stop_spinner(&setup_spinner);
+    
+    print_colored("-> ", COLOR_CYAN);
+    print_colored("Starting upload: ", COLOR_YELLOW);
+    print_colored(filename, COLOR_GREEN);
+    printf("\n");
     
     // Perform upload
     res = curl_easy_perform(curl);
@@ -196,15 +291,20 @@ int cdrive_list_files(const char *folder_id) {
     CURL *curl;
     CURLcode res;
     APIResponse response = {0};
+    LoadingSpinner list_spinner = {0};
+    
+    start_spinner(&list_spinner, "Fetching files from Google Drive...");
     
     // Load tokens
     if (load_tokens(&g_tokens) != 0) {
+        stop_spinner(&list_spinner);
         print_error("Not authenticated. Run 'cdrive auth login' first.");
         return -1;
     }
     
     curl = curl_easy_init();
     if (!curl) {
+        stop_spinner(&list_spinner);
         print_error("Error initializing curl");
         return -1;
     }
@@ -213,11 +313,11 @@ int cdrive_list_files(const char *folder_id) {
     char url[1024];
     if (strcmp(folder_id, "root") == 0) {
         snprintf(url, sizeof(url), 
-                "%s?q='root' in parents and trashed=false&fields=files(id,name,mimeType,size,modifiedTime)", 
+                "%s?q=%%27root%%27%%20in%%20parents%%20and%%20trashed=false&fields=files(id,name,mimeType,size,modifiedTime)", 
                 DRIVE_API_URL);
     } else {
         snprintf(url, sizeof(url), 
-                "%s?q='%s' in parents and trashed=false&fields=files(id,name,mimeType,size,modifiedTime)", 
+                "%s?q=%%27%s%%27%%20in%%20parents%%20and%%20trashed=false&fields=files(id,name,mimeType,size,modifiedTime)", 
                 DRIVE_API_URL, folder_id);
     }
     
@@ -240,6 +340,8 @@ int cdrive_list_files(const char *folder_id) {
     // Clean up
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
+    
+    stop_spinner(&list_spinner);
     
     if (res != CURLE_OK) {
         print_error("Failed to list files");
@@ -290,8 +392,8 @@ int cdrive_list_files(const char *folder_id) {
                             if (json_object_object_get_ex(file_obj, "size", &size_obj)) {
                                 long long size = json_object_get_int64(size_obj);
                                 printf(" (");
-                                print_colored("%.1f KB", COLOR_CYAN);
-                                printf(")", (double)size / 1024);
+                                printf(COLOR_CYAN "%.1f KB" COLOR_RESET, (double)size / 1024);
+                                printf(")");
                             }
                             
                             printf("\n");

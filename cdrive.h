@@ -4,6 +4,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#include <math.h>
+#include <pthread.h>
 #include <curl/curl.h>
 #include <json-c/json.h>
 
@@ -109,6 +112,8 @@
 #define CONFIG_DIR ".cdrive"
 #define TOKEN_FILE "token.json"
 #define CLIENT_ID_FILE "client_id.json"
+#define UPDATE_CACHE_FILE "update_cache.json"
+#define UPDATE_CACHE_EXPIRE_HOURS 4  // Cache update checks for 4 hours
 
 // Colors for terminal output
 #define COLOR_RESET     "\033[0m"
@@ -174,17 +179,37 @@ int cdrive_upload(const char *source_path, const char *target_folder);
 int cdrive_list_files(const char *folder_id);
 int cdrive_create_folder(const char *folder_name, const char *parent_id);
 
+// Version and update information
+#define CDRIVE_VERSION "1.0.0"
+#define CDRIVE_RELEASE_DATE "2025-08-11"
+#define GITHUB_REPO_URL "https://api.github.com/repos/batuhantrkgl/CDrive/releases/latest"
+#define GITHUB_RELEASES_URL "https://github.com/batuhantrkgl/CDrive/releases"
+
+typedef struct {
+    char version[32];
+    char release_date[16];
+    char download_url[256];
+    char tag_name[32];
+    int is_newer;
+} UpdateInfo;
+
 // Helper functions
 int setup_config_dir(void);
 int save_tokens(const OAuthTokens *tokens);
 int load_tokens(OAuthTokens *tokens);
 int load_client_credentials(ClientCredentials *creds);
 int refresh_access_token(OAuthTokens *tokens);
+int get_user_info(char *user_name, size_t name_size);
 char *get_file_mime_type(const char *filename);
 size_t write_response_callback(void *contents, size_t size, size_t nmemb, APIResponse *response);
 void print_usage(void);
 void print_version(void);
-int start_local_server(char *auth_code);
+void print_version_with_update_check(void);
+int check_for_updates(UpdateInfo *update_info);
+int force_check_for_updates(UpdateInfo *update_info);
+int download_and_install_update(const UpdateInfo *update_info, int auto_install);
+int compare_versions(const char *current, const char *latest);
+int start_local_server(char *auth_code, const char *auth_url, int open_browser);
 char *url_encode(const char *str);
 
 // Interactive UI functions
@@ -200,5 +225,16 @@ void enable_raw_mode(void);
 void disable_raw_mode(void);
 void clear_line(void);
 void move_cursor_up(int lines);
+
+// Loading spinner functions
+typedef struct {
+    int active;
+    pthread_t thread;
+    char message[256];
+} LoadingSpinner;
+
+void start_spinner(LoadingSpinner *spinner, const char *message);
+void stop_spinner(LoadingSpinner *spinner);
+void *spinner_thread(void *arg);
 
 #endif // cdrive_H

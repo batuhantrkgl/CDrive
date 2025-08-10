@@ -82,17 +82,30 @@ pacman -S mingw-w64-x86_64-curl mingw-w64-x86_64-json-c
 
 ## Installation
 
-### Option 1: Download Pre-built Binaries
-1. Go to the [Releases](https://github.com/batuhantrkgl/CDrive/releases) page
-2. Download the appropriate binary for your platform
-3. Extract and move to your PATH:
+### Option 1: Download Latest Build Artifacts
+1. Go to the [Actions](https://github.com/batuhantrkgl/CDrive/actions) page
+2. Click on the latest successful workflow run
+3. Download the appropriate binary for your platform from the artifacts section
+4. Extract and move to your PATH:
    ```bash
    # Linux/macOS
+   tar -xzf cdrive-<platform>.tar.gz
    sudo mv cdrive /usr/local/bin/
    sudo chmod +x /usr/local/bin/cdrive
    ```
 
-### Option 2: Build from Source
+### Option 2: Download from Releases (Automated)
+1. Go to the [Releases](https://github.com/batuhantrkgl/CDrive/releases) page
+2. Download the appropriate binary for your platform from the latest release
+3. Extract and move to your PATH:
+   ```bash
+   # Linux/macOS
+   tar -xzf cdrive-<platform>.tar.gz
+   sudo mv cdrive /usr/local/bin/
+   sudo chmod +x /usr/local/bin/cdrive
+   ```
+
+### Option 3: Build from Source
 ```bash
 git clone https://github.com/batuhantrkgl/CDrive.git
 cd CDrive
@@ -466,6 +479,19 @@ You can manually trigger builds from the GitHub Actions tab with optional debug 
 ```
 
 The CI/CD system uses the same Makefile and build logic as local development, ensuring consistency between local and automated builds.
+
+#### Automated Releases
+CDrive features an automated release system that:
+- **Auto-generates versions** based on date and commit count (e.g., `2025.08.11.42-a1b2c3d`)
+- **Updates README.md** automatically with new version badges
+- **Creates GitHub releases** with all platform binaries and checksums
+- **Provides comprehensive release notes** with recent changes and installation instructions
+
+To trigger a release:
+1. Push to `main` or `master` branch (automatic release)
+2. Or use **Actions → Build and Release → Run workflow** with "Create release" enabled
+
+All releases include binaries for Linux (x86_64, i386, ARM64, ARMHF), Windows (x86_64, i386), and macOS (Intel, Apple Silicon).
 
 ## Output Features
 

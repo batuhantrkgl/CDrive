@@ -1,72 +1,79 @@
 #define _GNU_SOURCE
 #include "cdrive.h"
 
-void clear_line(void) {
-    printf("\r\033[K");
-}
-
-void move_cursor_up(int lines) {
-    printf("\033[%dA", lines);
-}
-
 int show_interactive_menu(const char *question, const char **options, int num_options) {
     int selected = 0;
-    int key;
-
-    printf("%s%s%s  [Use arrows to move, type to filter]\n", COLOR_CYAN, question, COLOR_RESET);
-    
-    enable_raw_mode();
+    char input;
     
     while (1) {
+        // Clear screen and position cursor at top
+        printf("\033[2J\033[H");
+        
+        // Display question with colored prompt
+        print_colored("[?] ", COLOR_CYAN);
+        print_colored(question, COLOR_BOLD);
+        printf("\n\n");
+        printf("Use %s↑/↓%s arrows to navigate, %sEnter%s to select, %sq%s to quit:\n\n", 
+               COLOR_YELLOW, COLOR_RESET, COLOR_YELLOW, COLOR_RESET, COLOR_YELLOW, COLOR_RESET);
+        
         // Display options
         for (int i = 0; i < num_options; i++) {
             if (i == selected) {
-                printf("%s> %s%s\n", COLOR_GREEN, options[i], COLOR_RESET);
+                print_colored("> ", COLOR_GREEN);
+                print_colored(options[i], COLOR_BOLD);
+                printf("\n");
             } else {
                 printf("  %s\n", options[i]);
             }
         }
         
-        key = platform_getchar();
+        printf("\n");
+        fflush(stdout);
         
-        // Move cursor back up
-        move_cursor_up(num_options);
+        // Get input
+        enable_raw_mode();
+        input = platform_getchar();
         
-        switch (key) {
-            case '\033': // Arrow keys
-                platform_getchar(); // Skip [
-                switch (platform_getchar()) {
-                    case 'A': // Up arrow
-                        selected = (selected - 1 + num_options) % num_options;
-                        break;
-                    case 'B': // Down arrow
-                        selected = (selected + 1) % num_options;
-                        break;
+        switch (input) {
+            case '\033': // Arrow keys sequence
+                if (platform_getchar() == '[') {
+                    char arrow = platform_getchar();
+                    switch (arrow) {
+                        case 'A': // Up arrow
+                            selected = (selected - 1 + num_options) % num_options;
+                            break;
+                        case 'B': // Down arrow
+                            selected = (selected + 1) % num_options;
+                            break;
+                    }
                 }
                 break;
             case '\n': // Enter
             case '\r':
                 disable_raw_mode();
-                // Clear the menu lines
-                for (int i = 0; i < num_options; i++) {
-                    clear_line();
-                    printf("\n");
-                }
-                move_cursor_up(num_options);
-                printf("%s%s%s %s%s%s\n", COLOR_CYAN, question, COLOR_RESET, 
-                       COLOR_BOLD, options[selected], COLOR_RESET);
+                // Clear screen and show final selection
+                printf("\033[2J\033[H");
+                print_colored("[>] ", COLOR_GREEN);
+                print_colored("Selected: ", COLOR_BOLD);
+                printf("%s\n\n", options[selected]);
                 return selected;
             case 'q':
             case 'Q':
                 disable_raw_mode();
-                return -1; // Quit
+                printf("\033[2J\033[H");
+                print_colored("[!] ", COLOR_YELLOW);
+                printf("Authentication cancelled.\n");
+                return -1;
+            case 'k': // vim-style up
+            case 'K':
+                selected = (selected - 1 + num_options) % num_options;
+                break;
+            case 'j': // vim-style down
+            case 'J':
+                selected = (selected + 1) % num_options;
+                break;
         }
-        
-        // Clear lines for redraw
-        for (int i = 0; i < num_options; i++) {
-            clear_line();
-        }
-        move_cursor_up(num_options);
+        disable_raw_mode();
     }
 }
 
@@ -76,19 +83,23 @@ void print_colored(const char *text, const char *color) {
 }
 
 void print_success(const char *message) {
-    printf("%s✓%s %s\n", COLOR_GREEN, COLOR_RESET, message);
+    print_colored("[+] ", COLOR_GREEN);
+    printf("%s\n", message);
 }
 
 void print_error(const char *message) {
-    printf("%s✗%s %s\n", COLOR_RED, COLOR_RESET, message);
+    print_colored("[!] ", COLOR_RED);
+    printf("%s\n", message);
 }
 
 void print_warning(const char *message) {
-    printf("%s!%s %s\n", COLOR_YELLOW, COLOR_RESET, message);
+    print_colored("[!] ", COLOR_YELLOW);
+    printf("%s\n", message);
 }
 
 void print_info(const char *message) {
-    printf("%sℹ%s %s\n", COLOR_BLUE, COLOR_RESET, message);
+    print_colored("[i] ", COLOR_BLUE);
+    printf("%s\n", message);
 }
 
 void print_header(const char *title) {
@@ -136,19 +147,19 @@ static int interactive_credential_setup(void) {
         printf("\n");
         print_info("Setting up Google Drive OAuth2 credentials:");
         printf("\n");
-        printf("1. 🌐 Go to: %shttps://console.cloud.google.com/%s\n", COLOR_BLUE, COLOR_RESET);
-        printf("2. 📁 Create a new project or select an existing one\n");
-        printf("3. 🔌 Enable the Google Drive API:\n");
-        printf("   - Navigate to APIs & Services > Library\n");
-        printf("   - Search for 'Google Drive API' and enable it\n");
-        printf("4. 🔑 Create OAuth2 credentials:\n");
+        printf("1. Go to: %shttps://console.cloud.google.com/%s\n", COLOR_BLUE, COLOR_RESET);
+        printf("%s2. Create a new project or select an existing one%s\n", COLOR_BOLD, COLOR_RESET);
+        printf("%s3. Enable the Google Drive API:%s\n", COLOR_BOLD, COLOR_RESET);
+        printf("   - Navigate to %sAPIs & Services > Library%s\n", COLOR_BLUE, COLOR_RESET);
+        printf("   - Search for %s'Google Drive API'%s and enable it\n", COLOR_BLUE, COLOR_RESET);
+        printf("%s4. Create OAuth2 credentials:%s\n", COLOR_BOLD, COLOR_RESET);
         printf("   - Go to APIs & Services > Credentials\n");
-        printf("   - Click 'Create Credentials' > 'OAuth 2.0 Client IDs'\n");
-        printf("   - Choose 'Desktop application'\n");
+        printf("   - Click %s'Create Credentials' > 'OAuth 2.0 Client IDs'%s\n", COLOR_BLUE, COLOR_RESET);
+        printf("   - Choose %s'Desktop application'%s\n", COLOR_BLUE, COLOR_RESET);
         printf("   - Add redirect URI: %shttp://localhost:8080/callback%s\n", COLOR_YELLOW, COLOR_RESET);
-        printf("5. 📥 Download the credentials JSON file\n\n");
-        printf("💡 Tip: Look for 'client_id' and 'client_secret' in the downloaded JSON\n\n");
-        printf("After setup, run 'cdrive auth login' again.\n");
+        printf("%s5. Download the credentials JSON file%s\n\n", COLOR_BOLD, COLOR_RESET);
+        printf("Tip: Look for 'client_id' and 'client_secret' in the downloaded JSON\n\n");
+        printf("After setup, run %s'cdrive auth login'%s again.\n", COLOR_YELLOW, COLOR_RESET);
         return -1;
     }
     
@@ -197,7 +208,8 @@ static int interactive_credential_setup(void) {
     fprintf(file, "}\n");
     fclose(file);
     
-    printf("✓ Credentials saved successfully!\n");
+    print_colored("[+] ", COLOR_GREEN);
+    printf("Credentials saved successfully!\n");
     return 0;
 }
 
@@ -209,7 +221,16 @@ int load_client_credentials(ClientCredentials *creds) {
     
     FILE *file = fopen(config_path, "r");
     if (!file) {
-        return interactive_credential_setup();
+        // Try interactive setup first
+        if (interactive_credential_setup() != 0) {
+            return -1;
+        }
+        // Now try to open the file again after interactive setup
+        file = fopen(config_path, "r");
+        if (!file) {
+            print_error("Failed to load credentials after setup");
+            return -1;
+        }
     }
     
     char buffer[2048];
@@ -234,6 +255,10 @@ int load_client_credentials(ClientCredentials *creds) {
     strncpy(creds->client_id, json_object_get_string(client_id_obj), sizeof(creds->client_id) - 1);
     strncpy(creds->client_secret, json_object_get_string(client_secret_obj), sizeof(creds->client_secret) - 1);
     
+    // Ensure null termination
+    creds->client_id[sizeof(creds->client_id) - 1] = '\0';
+    creds->client_secret[sizeof(creds->client_secret) - 1] = '\0';
+    
     json_object_put(root);
     return 0;
 }
@@ -255,7 +280,7 @@ size_t write_response_callback(void *contents, size_t size, size_t nmemb, APIRes
     return total_size;
 }
 
-int start_local_server(char *auth_code) {
+int start_local_server(char *auth_code, const char *auth_url, int open_browser) {
     int server_fd, new_socket;
     struct sockaddr_in address;
     int opt = 1;
@@ -311,15 +336,48 @@ int start_local_server(char *auth_code) {
         return -1;
     }
     
-    print_colored("⏳ ", COLOR_YELLOW);
-    printf("Waiting for authentication callback...\n");
+    print_colored("[*] ", COLOR_YELLOW);
+    printf("Starting authentication server...\n");
+    
+    LoadingSpinner spinner = {0};
+    start_spinner(&spinner, "Waiting for authentication callback...");
+    
+    // Open browser if requested
+    if (open_browser) {
+        // Temporarily stop spinner for clean browser opening message
+        stop_spinner(&spinner);
+        
+#ifdef _WIN32
+        char open_cmd[1024];
+        snprintf(open_cmd, sizeof(open_cmd), "start \"\" \"%s\"", auth_url);
+#else
+        char open_cmd[1024];
+        snprintf(open_cmd, sizeof(open_cmd), "xdg-open \"%s\" 2>/dev/null || open \"%s\" 2>/dev/null", 
+                 auth_url, auth_url);
+#endif
+        
+        printf("\n");  // Ensure we're on a new line
+        print_colored("\n[>] ", COLOR_GREEN);
+        printf("Opening browser...\n");
+        int browser_result = system(open_cmd);
+        
+        if (browser_result != 0) {
+            print_warning("Could not automatically open browser. Please copy the URL above and paste it into your browser manually.");
+        }
+        
+        // Restart spinner after browser message
+        start_spinner(&spinner, "Waiting for authentication callback...");
+    }
     
     // Accept connection
     if ((new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen)) < 0) {
+        stop_spinner(&spinner);
         perror("accept");
         close(server_fd);
         return -1;
     }
+    
+    stop_spinner(&spinner);
     
     // Read request
     read(new_socket, buffer, 4096);
@@ -395,7 +453,7 @@ static int exchange_code_for_tokens(const char *auth_code, OAuthTokens *tokens) 
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_response_callback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
     
-    print_colored("🔄 ", COLOR_BLUE);
+    print_colored("[>] ", COLOR_BLUE);
     printf("Exchanging authorization code for access tokens...\n");
     
     // Perform request
@@ -414,10 +472,7 @@ static int exchange_code_for_tokens(const char *auth_code, OAuthTokens *tokens) 
         return -1;
     }
     
-    printf("HTTP Status: %ld\n", http_code);
-    if (response.data) {
-        printf("Response: %s\n", response.data);
-    }
+    // Check HTTP status (debug output removed)
     
     if (http_code != 200) {
         print_error("HTTP error during token exchange");
@@ -472,7 +527,7 @@ int cdrive_auth_login(void) {
         return -1;
     }
     
-    // Debug: Check if credentials were loaded properly
+    // Check if credentials were loaded properly
     if (strlen(g_client_creds.client_id) < 10) {
         print_error("Invalid or missing client_id. Please check your credentials.");
         printf("Current client_id length: %zu\n", strlen(g_client_creds.client_id));
@@ -484,10 +539,10 @@ int cdrive_auth_login(void) {
         return -1;
     }
     
-    printf("✓ Client credentials loaded successfully\n");
-    printf("  Client ID: %.20s...\n", g_client_creds.client_id);
+    print_colored("[+] ", COLOR_GREEN);
+    printf("Client credentials loaded successfully\n");
     
-    print_colored("🔐 ", COLOR_BLUE);
+    print_colored("[*] ", COLOR_BLUE);
     printf("Starting Google Drive authentication...\n\n");
     
     // URL encode parameters
@@ -507,24 +562,17 @@ int cdrive_auth_login(void) {
     free(encoded_redirect);
     free(encoded_scope);
     
-    // Debug: Show the authorization URL (with client_id partially hidden for security)
-    printf("🔗 Authorization URL constructed:\n");
-    printf("   Base: %s\n", OAUTH_AUTH_URL);
-    printf("   Client ID: %.20s...\n", g_client_creds.client_id);
-    printf("   Redirect URI: %s\n", REDIRECT_URI);
-    printf("\n");
-    
     print_warning("First, authenticate in your web browser");
     printf("Press ");
     print_colored("Enter", COLOR_BOLD);
-    printf(" to open Google's authorization page in your browser...\n");
-    printf("Or copy this URL manually: \n%s\n\n", auth_url);
+    printf(" to open Google's authorization page in your browser...\n\n");
     
     // Wait for user to press Enter
     getchar();
     
     // Start local server to receive callback FIRST
-    printf("🔧 Starting local server on port 8080...\n");
+    print_colored("[*] ", COLOR_BLUE);
+    printf("Starting local server on port 8080...\n");
     
     // Initialize socket subsystem
     if (init_winsock() != 0) {
@@ -534,18 +582,8 @@ int cdrive_auth_login(void) {
     
 #ifdef _WIN32
     // Windows: Use simple synchronous approach (no fork)
-    // Open browser first
-    char open_cmd[1024];
-    snprintf(open_cmd, sizeof(open_cmd), "start \"\" \"%s\"", auth_url);
-    printf("🌐 Opening browser...\n");
-    int browser_result = system(open_cmd);
-    
-    if (browser_result != 0) {
-        print_warning("Could not automatically open browser. Please copy the URL above and paste it into your browser manually.");
-    }
-    
-    // Start server and wait for callback
-    if (start_local_server(auth_code) != 0) {
+    // Start server and wait for callback (spinner is handled inside start_local_server)
+    if (start_local_server(auth_code, auth_url, 1) != 0) {
         print_error("Failed to receive authorization callback");
         cleanup_winsock();
         return -1;
@@ -568,7 +606,7 @@ int cdrive_auth_login(void) {
         close(pipefd[0]); // Close read end in child
         
         char temp_auth_code[256] = {0};
-        int result = start_local_server(temp_auth_code);
+        int result = start_local_server(temp_auth_code, auth_url, 0);
         
         if (result == 0 && strlen(temp_auth_code) > 0) {
             // Send the auth code to parent via pipe
@@ -586,16 +624,23 @@ int cdrive_auth_login(void) {
         char open_cmd[1024];
         snprintf(open_cmd, sizeof(open_cmd), "xdg-open \"%s\" 2>/dev/null || open \"%s\" 2>/dev/null", 
                  auth_url, auth_url);
-        printf("🌐 Opening browser...\n");
+        print_colored("\n[>] ", COLOR_GREEN);
+        printf("Opening browser...\n");
         int browser_result = system(open_cmd);
         
         if (browser_result != 0) {
             print_warning("Could not automatically open browser. Please copy the URL above and paste it into your browser manually.");
         }
         
+        // Start spinner for waiting
+        LoadingSpinner auth_spinner = {0};
+        start_spinner(&auth_spinner, "Waiting for authentication callback...");
+        
         // Wait for the child process to complete
         int status;
         waitpid(server_pid, &status, 0);
+        
+        stop_spinner(&auth_spinner);
         
         if (WEXITSTATUS(status) != 0) {
             print_error("Failed to receive authorization callback");
@@ -625,21 +670,27 @@ int cdrive_auth_login(void) {
         char open_cmd[1024];
         snprintf(open_cmd, sizeof(open_cmd), "xdg-open \"%s\" 2>/dev/null || open \"%s\" 2>/dev/null", 
                  auth_url, auth_url);
-        printf("🌐 Opening browser...\n");
+        print_colored("\n[>] ", COLOR_GREEN);
+        printf("Opening browser...\n");
         system(open_cmd);
         
+        // Start spinner for waiting
+        LoadingSpinner auth_spinner = {0};
+        start_spinner(&auth_spinner, "Waiting for authentication callback...");
+        
         // Start local server to receive callback
-        if (start_local_server(auth_code) != 0) {
+        if (start_local_server(auth_code, auth_url, 1) != 0) {
+            stop_spinner(&auth_spinner);
             print_error("Failed to receive authorization callback");
             cleanup_winsock();
             return -1;
         }
+        
+        stop_spinner(&auth_spinner);
     }
 #endif
     
     cleanup_winsock();
-    
-    printf("Debug: auth_code received: '%.50s...'\n", auth_code);
     
     if (strlen(auth_code) == 0) {
         print_error("Authorization code is empty");
@@ -733,4 +784,68 @@ int load_tokens(OAuthTokens *tokens) {
     
     json_object_put(root);
     return 0;
+}
+
+int get_user_info(char *user_name, size_t name_size) {
+    CURL *curl;
+    CURLcode res;
+    APIResponse response = {0};
+    
+    if (strlen(g_tokens.access_token) == 0) {
+        return -1;
+    }
+    
+    curl = curl_easy_init();
+    if (!curl) {
+        return -1;
+    }
+    
+    // Set up authorization header
+    char auth_header[1024];
+    snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", g_tokens.access_token);
+    
+    struct curl_slist *headers = NULL;
+    headers = curl_slist_append(headers, auth_header);
+    
+    // Configure curl to get user info from Google Drive API
+    curl_easy_setopt(curl, CURLOPT_URL, "https://www.googleapis.com/drive/v3/about?fields=user");
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_response_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+    
+    // Perform request
+    res = curl_easy_perform(curl);
+    
+    // Clean up
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+    
+    if (res != CURLE_OK) {
+        if (response.data) free(response.data);
+        return -1;
+    }
+    
+    // Parse response to get user name
+    if (response.data) {
+        json_object *root = json_tokener_parse(response.data);
+        if (root) {
+            json_object *user_obj, *display_name_obj;
+            
+            if (json_object_object_get_ex(root, "user", &user_obj) &&
+                json_object_object_get_ex(user_obj, "displayName", &display_name_obj)) {
+                
+                const char *name = json_object_get_string(display_name_obj);
+                strncpy(user_name, name, name_size - 1);
+                user_name[name_size - 1] = '\0';
+                
+                json_object_put(root);
+                free(response.data);
+                return 0;
+            }
+            json_object_put(root);
+        }
+        free(response.data);
+    }
+    
+    return -1;
 }

@@ -1,10 +1,10 @@
-name: Build and Test
+name: Build and Release
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, develop, master ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, master ]
   workflow_dispatch:
     inputs:
       platforms:
@@ -17,6 +17,16 @@ on:
         required: false
         default: false
         type: boolean
+      create_release:
+        description: 'Create a new release (only on main/master branch)'
+        required: false
+        default: false
+        type: boolean
+      version:
+        description: 'Release version (auto-generated if empty)'
+        required: false
+        default: ''
+        type: string
 
 jobs:
   build:
@@ -258,3 +268,256 @@ jobs:
         name: cdrive-all-platforms${{ github.event.inputs.debug == 'true' && '-debug' || '' }}
         path: ./combined/*.tar.gz
         retention-days: 90
+
+  create-release:
+    name: Create Release
+    needs: [build, create-combined-artifact]
+    runs-on: ubuntu-latest
+    if: |
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')) ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release_url: ${{ steps.release.outputs.html_url }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract version from main.c
+      id: version
+      run: |
+        if [[ "${{ github.event.inputs.version }}" != "" ]]; then
+          VERSION="${{ github.event.inputs.version }}"
+          echo "Using manual version: ${VERSION}"
+        else
+          # Extract version from main.c (look for print_colored with COLOR_GREEN)
+          VERSION_LINE=$(grep 'print_colored.*COLOR_GREEN' main.c | head -1)
+          if [[ -n "$VERSION_LINE" ]]; then
+            # Extract version between quotes (e.g., "1.0.1 (2025-08-11)")
+            VERSION=$(echo "$VERSION_LINE" | sed 's/.*print_colored("\([^"]*\)", COLOR_GREEN.*/\1/')
+            echo "Extracted version from main.c: ${VERSION}"
+          else
+            echo "Could not extract version from main.c, falling back to auto-generation"
+            DATE=$(date +'%Y.%m.%d')
+            COMMIT_COUNT=$(git rev-list --count HEAD)
+            SHORT_SHA=$(git rev-parse --short HEAD)
+            VERSION="${DATE}.${COMMIT_COUNT}-${SHORT_SHA}"
+            echo "Generated fallback version: ${VERSION}"
+          fi
+        fi
+        echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+    - name: Update README.md with new version
+      id: update_readme
+      run: |
+        VERSION="${{ steps.version.outputs.version }}"
+        
+        # Extract just the version number for badges (remove date if present)
+        # Extract pattern like "1.0.1" from "1.0.1 (2025-08-11)"
+        BADGE_VERSION=$(echo "$VERSION" | grep -o '^[0-9]\+\.[0-9]\+\.[0-9]\+' || echo "$VERSION")
+        
+        echo "Full version: $VERSION"
+        echo "Badge version: $BADGE_VERSION"
+        
+        # Update version badge with the clean version number
+        sed -i "s/version-[^-]*-green/version-${BADGE_VERSION}-green/g" README.md
+        
+        # Update any version references in the README
+        sed -i "s/\[Version\](https:\/\/img\.shields\.io\/badge\/version-[^-]*-green\.svg)/[Version](https:\/\/img.shields.io\/badge\/version-${BADGE_VERSION}-green.svg)/g" README.md
+        
+        # Also update the release URL in the print_version function if it exists
+        if grep -q "releases/tag/" main.c; then
+          sed -i "s|releases/tag/[^\"]*|releases/tag/v${VERSION}|g" main.c
+          echo "Updated release URL in main.c"
+        fi
+        
+        # Check if changes were made
+        if git diff --quiet README.md main.c; then
+          echo "changes=false" >> $GITHUB_OUTPUT
+          echo "No changes needed in README.md or main.c"
+        else
+          echo "changes=true" >> $GITHUB_OUTPUT
+          echo "Updated files with version ${BADGE_VERSION}"
+          echo "README.md changes:"
+          git diff README.md | head -10 || true
+          echo "main.c changes:"
+          git diff main.c | head -10 || true
+        fi
+
+    - name: Commit README changes
+      if: steps.update_readme.outputs.changes == 'true'
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add README.md main.c
+        git commit -m "🚀 Release v${{ steps.version.outputs.version }}: Update version badges and URLs"
+        git push
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: ./release-artifacts
+
+    - name: Prepare release files
+      run: |
+        mkdir -p ./release
+        find ./release-artifacts -name "*.tar.gz" -exec cp {} ./release/ \;
+        ls -la ./release/
+        
+        # Create a comprehensive release archive
+        cd release
+        tar -czf "cdrive-v${{ steps.version.outputs.version }}-all-platforms.tar.gz" *.tar.gz
+        
+        # Generate checksums
+        sha256sum *.tar.gz > checksums.txt
+        
+        ls -la
+
+    - name: Generate Release Notes
+      id: release_notes
+      run: |
+        VERSION="${{ steps.version.outputs.version }}"
+        
+        # Get recent commits for release notes
+        COMMITS=$(git log --oneline --since="7 days ago" --pretty=format:"- %s (%h)" | head -10)
+        
+        cat > release_notes.md << EOF
+        # CDrive v${VERSION}
+        
+        A cross-platform Google Drive CLI tool written in C.
+        
+        ## 📦 Downloads
+        
+        Choose the appropriate binary for your platform:
+        
+        ### Linux
+        - **x86_64**: \`cdrive-linux-x86_64.tar.gz\` (Intel/AMD 64-bit)
+        - **i386**: \`cdrive-linux-i386.tar.gz\` (Intel/AMD 32-bit)
+        - **ARM64**: \`cdrive-linux-arm64.tar.gz\` (ARM 64-bit)
+        - **ARMHF**: \`cdrive-linux-armhf.tar.gz\` (ARM 32-bit with hardware floating point)
+        
+        ### Windows
+        - **x86_64**: \`cdrive-windows-x86_64.tar.gz\` (Intel/AMD 64-bit)
+        - **i386**: \`cdrive-windows-i386.tar.gz\` (Intel/AMD 32-bit)
+        
+        ### macOS
+        - **Intel**: \`cdrive-darwin-x86_64.tar.gz\` (Intel Macs)
+        - **Apple Silicon**: \`cdrive-darwin-arm64.tar.gz\` (M1/M2/M3 Macs)
+        
+        ### All Platforms
+        - **Complete Bundle**: \`cdrive-v${VERSION}-all-platforms.tar.gz\` (All platforms in one archive)
+        
+        ## 🔧 Installation
+        
+        1. Download the appropriate archive for your platform
+        2. Extract: \`tar -xzf cdrive-<platform>.tar.gz\`
+        3. Make executable: \`chmod +x cdrive\` (Linux/macOS)
+        4. Move to PATH: \`sudo mv cdrive /usr/local/bin/\` (Linux/macOS)
+        
+        ## ✨ Features
+        
+        - 🔐 **OAuth2 Authentication** - Secure Google Drive authentication
+        - 📤 **File Upload** - Upload files with real-time progress indication
+        - 📁 **Folder Management** - Create and organize folders
+        - 📋 **File Listing** - Browse Google Drive contents
+        - 🎨 **Colored Output** - Beautiful terminal interface with colors
+        - ⚡ **Fast & Lightweight** - Written in C for optimal performance
+        - 🔄 **Token Management** - Automatic token refresh and secure storage
+        - 🌍 **Cross-Platform** - Works on Linux, Windows, and macOS
+        
+        ## 📝 Recent Changes
+        
+        ${COMMITS}
+        
+        ## 🔒 Checksums
+        
+        Verify your download with SHA256:
+        \`\`\`
+        $(cat release/checksums.txt)
+        \`\`\`
+        
+        ## 🚀 Quick Start
+        
+        1. Set up Google Drive API credentials
+        2. Authenticate: \`cdrive auth login\`
+        3. Upload a file: \`cdrive upload ./myfile.txt\`
+        4. List files: \`cdrive list\`
+        
+        ## 📖 Documentation
+        
+        Full documentation available in the [README.md](https://github.com/${{ github.repository }}/blob/main/README.md)
+        
+        ---
+        
+        **Built with ❤️ in C** | **Release Date**: $(date +'%Y-%m-%d %H:%M:%S UTC')
+        EOF
+        
+        echo "Release notes generated successfully"
+
+    - name: Create Release
+      id: release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: v${{ steps.version.outputs.version }}
+        release_name: "CDrive v${{ steps.version.outputs.version }}"
+        body_path: release_notes.md
+        draft: false
+        prerelease: false
+
+    - name: Upload Release Assets
+      run: |
+        VERSION="${{ steps.version.outputs.version }}"
+        UPLOAD_URL="${{ steps.release.outputs.upload_url }}"
+        
+        # Function to upload a file
+        upload_file() {
+          local file=$1
+          local name=$(basename "$file")
+          
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Content-Type: application/gzip" \
+            --data-binary @"$file" \
+            "${UPLOAD_URL%{?name,label}*}?name=${name}&label=${name}"
+          
+          echo "✅ Uploaded: $name"
+        }
+        
+        cd release
+        
+        # Upload individual platform archives
+        for file in cdrive-*.tar.gz; do
+          if [[ "$file" != *"all-platforms"* ]]; then
+            upload_file "$file"
+          fi
+        done
+        
+        # Upload the complete bundle
+        upload_file "cdrive-v${VERSION}-all-platforms.tar.gz"
+        
+        # Upload checksums
+        curl -X POST \
+          -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+          -H "Content-Type: text/plain" \
+          --data-binary @checksums.txt \
+          "${UPLOAD_URL%{?name,label}*}?name=checksums.txt&label=SHA256 Checksums"
+        
+        echo "✅ All release assets uploaded successfully!"
+
+    - name: Update Release Description
+      run: |
+        echo "🎉 Release v${{ steps.version.outputs.version }} created successfully!"
+        echo "📍 Release URL: ${{ steps.release.outputs.html_url }}"
+        echo "🏷️  Tag: v${{ steps.version.outputs.version }}"
+        echo ""
+        echo "The release includes:"
+        echo "- Binaries for all supported platforms"
+        echo "- Updated README.md with new version"
+        echo "- SHA256 checksums for verification"
+        echo "- Comprehensive release notes"
