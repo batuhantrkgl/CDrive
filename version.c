@@ -300,7 +300,7 @@ int check_for_updates(UpdateInfo *update_info) {
     
     // Set up headers for GitHub API
     struct curl_slist *headers = NULL;
-    headers = curl_slist_append(headers, "User-Agent: cdrive/1.0.0 (+https://github.com/batuhantrkgl/CDrive)");
+    headers = curl_slist_append(headers, "User-Agent: cdrive/1.0.1 (+https://github.com/batuhantrkgl/CDrive)");
     headers = curl_slist_append(headers, "Accept: application/vnd.github.v3+json");
     headers = curl_slist_append(headers, "X-GitHub-Api-Version: 2022-11-28");
     
@@ -598,7 +598,7 @@ int download_and_install_update(const UpdateInfo *update_info, int auto_install)
     
     // Add user agent and other headers
     struct curl_slist *headers = NULL;
-    headers = curl_slist_append(headers, "User-Agent: cdrive/1.0.0 (+https://github.com/batuhantrkgl/CDrive)");
+    headers = curl_slist_append(headers, "User-Agent: cdrive/1.0.1 (+https://github.com/batuhantrkgl/CDrive)");
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     
     CURLcode res = curl_easy_perform(curl);
