@@ -43,7 +43,7 @@ static int save_update_cache(const UpdateInfo *update_info) {
     time_t now = time(NULL);
     
     fprintf(file, "{\n");
-    fprintf(file, "  \"timestamp\": %ld,\n", now);
+    fprintf(file, "  \"timestamp\": %lld,\n", (long long)now);
     fprintf(file, "  \"version\": \"%s\",\n", update_info->version);
     fprintf(file, "  \"release_date\": \"%s\",\n", update_info->release_date);
     fprintf(file, "  \"tag_name\": \"%s\",\n", update_info->tag_name);
@@ -677,7 +677,14 @@ int download_and_install_update(const UpdateInfo *update_info, int auto_install)
         }
         
         // Check if we have write permission
-        if (access(current_exe, W_OK) != 0 && geteuid() != 0) {
+#ifdef _WIN32
+        // On Windows, we'll try the operation and handle errors
+        int has_permission = 1; // Assume we have permission on Windows
+#else
+        int has_permission = (access(current_exe, W_OK) == 0 || geteuid() == 0);
+#endif
+        
+        if (!has_permission) {
             print_warning("Permission denied for automatic installation");
             print_colored("[*] ", COLOR_CYAN);
             printf("Downloaded binary: %s\n", temp_file);
@@ -694,7 +701,7 @@ int download_and_install_update(const UpdateInfo *update_info, int auto_install)
         
         // Create backup
         char backup_file[600];
-        snprintf(backup_file, sizeof(backup_file), "%s.backup.%ld", current_exe, time(NULL));
+        snprintf(backup_file, sizeof(backup_file), "%s.backup.%lld", current_exe, (long long)time(NULL));
         
         // Perform installation
         int install_success = 0;
