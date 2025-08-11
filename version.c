@@ -548,18 +548,21 @@ int download_and_install_update(const UpdateInfo *update_info, int auto_install)
     // Create temporary file with better naming
     char temp_file[512];
     char temp_dir[256];
+    char extracted_file[512];
     
 #ifdef _WIN32
     const char *env_temp = getenv("TEMP");
     if (!env_temp) env_temp = getenv("TMP");
     if (!env_temp) env_temp = "C:\\Windows\\Temp";
     strncpy(temp_dir, env_temp, sizeof(temp_dir) - 1);
-    snprintf(temp_file, sizeof(temp_file), "%s\\cdrive_%s.exe", temp_dir, update_info->version);
+    snprintf(temp_file, sizeof(temp_file), "%s\\cdrive_%s.tar.gz", temp_dir, update_info->version);
+    snprintf(extracted_file, sizeof(extracted_file), "%s\\cdrive_%s_extracted", temp_dir, update_info->version);
 #else
     const char *env_temp = getenv("TMPDIR");
     if (!env_temp) env_temp = "/tmp";
     strncpy(temp_dir, env_temp, sizeof(temp_dir) - 1);
-    snprintf(temp_file, sizeof(temp_file), "%s/cdrive_%s", temp_dir, update_info->version);
+    snprintf(temp_file, sizeof(temp_file), "%s/cdrive_%s.tar.gz", temp_dir, update_info->version);
+    snprintf(extracted_file, sizeof(extracted_file), "%s/cdrive_%s_extracted", temp_dir, update_info->version);
 #endif
     
     // Download file with progress tracking
@@ -647,6 +650,48 @@ int download_and_install_update(const UpdateInfo *update_info, int auto_install)
         return -1;
     }
     
+    // Extract the tar.gz file
+    printf("\n");
+    print_colored("[*] ", COLOR_YELLOW);
+    printf("Extracting archive...\n");
+    
+    // Create extraction directory
+    if (mkdir(extracted_file, 0755) != 0) {
+        print_error("Failed to create extraction directory");
+        unlink(temp_file);
+        return -1;
+    }
+    
+    // Extract using tar command
+    char extract_cmd[1024];
+    snprintf(extract_cmd, sizeof(extract_cmd), "tar -xzf \"%s\" -C \"%s\"", temp_file, extracted_file);
+    
+    int extract_result = system(extract_cmd);
+    if (extract_result != 0) {
+        print_error("Failed to extract archive");
+        printf("Command: %s\n", extract_cmd);
+        unlink(temp_file);
+        rmdir(extracted_file);
+        return -1;
+    }
+    
+    // Find the extracted binary
+    char binary_path[512];
+    snprintf(binary_path, sizeof(binary_path), "%s/cdrive", extracted_file);
+    
+    // Check if binary exists
+    if (access(binary_path, F_OK) != 0) {
+        print_error("Extracted binary not found");
+        printf("Expected location: %s\n", binary_path);
+        unlink(temp_file);
+        // Clean up extraction directory
+        snprintf(extract_cmd, sizeof(extract_cmd), "rm -rf \"%s\"", extracted_file);
+        system(extract_cmd);
+        return -1;
+    }
+    
+    print_success("Archive extracted successfully!");
+    
     if (auto_install) {
         printf("\n");
         print_colored("[*] ", COLOR_YELLOW);
@@ -671,32 +716,53 @@ int download_and_install_update(const UpdateInfo *update_info, int auto_install)
         if (!found_exe) {
             print_warning("Could not determine current executable path");
             print_colored("[*] ", COLOR_CYAN);
-            printf("Downloaded binary: %s\n", temp_file);
+            printf("Extracted binary: %s\n", binary_path);
             printf("Please install manually by replacing your cdrive binary.\n");
             return 0;
         }
         
-        // Check if we have write permission
+        // Check if we have write permission to the directory and file
 #ifdef _WIN32
         // On Windows, we'll try the operation and handle errors
         int has_permission = 1; // Assume we have permission on Windows
 #else
-        int has_permission = (access(current_exe, W_OK) == 0 || geteuid() == 0);
+        int has_permission = 0;
+        
+        // Check if running as root
+        if (geteuid() == 0) {
+            has_permission = 1;
+        } else {
+            // Check write access to the file
+            if (access(current_exe, W_OK) == 0) {
+                has_permission = 1;
+            } else {
+                // Check write access to the directory containing the file
+                char *dir_path = strdup(current_exe);
+                char *last_slash = strrchr(dir_path, '/');
+                if (last_slash) {
+                    *last_slash = '\0';
+                    if (access(dir_path, W_OK) == 0) {
+                        has_permission = 1;
+                    }
+                }
+                free(dir_path);
+            }
+        }
 #endif
         
         if (!has_permission) {
             print_warning("Permission denied for automatic installation");
             print_colored("[*] ", COLOR_CYAN);
-            printf("Downloaded binary: %s\n", temp_file);
+            printf("Extracted binary: %s\n", binary_path);
             print_colored("[*] ", COLOR_CYAN);
             printf("To install manually:\n");
 #ifdef _WIN32
-            printf("  move \"%s\" \"%s\"\n", temp_file, current_exe);
+            printf("  move \"%s\" \"%s\"\n", binary_path, current_exe);
 #else
-            printf("  sudo mv \"%s\" \"%s\"\n", temp_file, current_exe);
+            printf("  sudo mv \"%s\" \"%s\"\n", binary_path, current_exe);
             printf("  sudo chmod +x \"%s\"\n", current_exe);
 #endif
-            return 0;
+            return -1; // Return error code for permission denied
         }
         
         // Create backup
@@ -709,13 +775,13 @@ int download_and_install_update(const UpdateInfo *update_info, int auto_install)
 #ifdef _WIN32
         // Windows installation
         if (CopyFile(current_exe, backup_file, FALSE) && 
-            CopyFile(temp_file, current_exe, FALSE)) {
+            CopyFile(binary_path, current_exe, FALSE)) {
             install_success = 1;
         }
 #else
         // Unix/Linux installation
         if (rename(current_exe, backup_file) == 0 && 
-            rename(temp_file, current_exe) == 0 && 
+            rename(binary_path, current_exe) == 0 && 
             chmod(current_exe, 0755) == 0) {
             install_success = 1;
         }
@@ -728,17 +794,21 @@ int download_and_install_update(const UpdateInfo *update_info, int auto_install)
             print_colored("[*] ", COLOR_CYAN);
             printf("Previous version backed up as: %s\n", backup_file);
             
-            // Clean up temp file
+            // Clean up temp files
             unlink(temp_file);
+            char cleanup_cmd[1024];
+            snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf \"%s\"", extracted_file);
+            system(cleanup_cmd);
         } else {
             print_error("Installation failed");
             print_colored("[*] ", COLOR_CYAN);
-            printf("Downloaded binary: %s\n", temp_file);
+            printf("Extracted binary: %s\n", binary_path);
             printf("Manual installation required.\n");
+            return -1; // Return error code for installation failure
         }
     } else {
         print_colored("[*] ", COLOR_CYAN);
-        printf("Downloaded to: %s\n", temp_file);
+        printf("Extracted binary: %s\n", binary_path);
         print_colored("[*] ", COLOR_CYAN);
         printf("To install manually, replace your current cdrive binary with this file.\n");
     }

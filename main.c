@@ -186,13 +186,19 @@ int main(int argc, char *argv[]) {
                     print_colored("[+] ", COLOR_GREEN);
                     printf("Update available: %s -> %s\n", CDRIVE_VERSION, update_info.version);
                     
-                    if (download_and_install_update(&update_info, 1) == 0) {
+                    int install_result = download_and_install_update(&update_info, 1);
+                    if (install_result == 0) {
                         printf("\n");
                         print_success("Update completed successfully!");
                     } else {
-                        print_error("Update installation failed");
-                        curl_global_cleanup();
-                        return 1;
+                        if (install_result == -1) {
+                            printf("\n");
+                            print_warning("Update download succeeded, but installation requires manual steps");
+                        } else {
+                            print_error("Update failed");
+                            curl_global_cleanup();
+                            return 1;
+                        }
                     }
                 } else {
                     printf("\n");
