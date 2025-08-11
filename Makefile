@@ -13,7 +13,7 @@ WHITE = \033[37m
 
 # Project configuration
 PROJECT_NAME = cdrive
-VERSION = 1.0.1
+VERSION = 1.0.2
 SOURCES = main.c auth.c upload.c spinner.c version.c
 
 # Build directories
