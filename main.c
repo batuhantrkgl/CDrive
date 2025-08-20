@@ -113,12 +113,24 @@ int main(int argc, char *argv[]) {
         
         print_colored("[>] ", COLOR_BLUE);
         printf("Creating folder '%s'...\n", folder_name);
-        if (cdrive_create_folder(folder_name, parent_id) == 0) {
-            print_success("Folder created successfully!");
-        } else {
+        if (cdrive_create_folder(folder_name, parent_id) != 0) {
             print_error("Failed to create folder.");
             curl_global_cleanup();
             return 1;
+        }
+    } else if (strcmp(argv[1], "pull") == 0) {
+        if (argc > 2) {
+            // Direct download by ID
+            const char *file_id = argv[2];
+            const char *output_filename = (argc > 3) ? argv[3] : NULL; // Pass NULL if not provided
+            if (cdrive_pull_file_by_id(file_id, output_filename) != 0) {
+                // Error is printed inside the function
+                curl_global_cleanup();
+                return 1;
+            }
+        } else {
+            // Interactive download
+            cdrive_pull_interactive();
         }
     } else if (strcmp(argv[1], "version") == 0 || strcmp(argv[1], "--version") == 0) {
         print_version_with_update_check();
@@ -268,39 +280,38 @@ int main(int argc, char *argv[]) {
 }
 
 void print_usage(void) {
-    print_colored("cdrive", COLOR_BOLD);
-    print_colored(" - Professional Google Drive CLI\n\n", COLOR_RESET);
+    printf("\n");
+    print_colored("cdrive", COLOR_BOLD_GREEN);
+    printf(" - A professional, lightweight command-line interface for Google Drive.\n\n");
     
     print_colored("USAGE\n", COLOR_BOLD);
-    printf("  cdrive <command> <subcommand> [flags]\n\n");
+    printf("  cdrive <command> [subcommand] [arguments]\n\n");
     
     print_colored("CORE COMMANDS\n", COLOR_BOLD);
-    printf("  auth        Authenticate with Google Drive\n");
-    printf("  upload      Upload files to Google Drive\n");
-    printf("  list        List files in Google Drive\n");
-    printf("  mkdir       Create folders in Google Drive\n\n");
+    printf("  %sauth%s        Manage authentication with Google Drive\n", COLOR_YELLOW, COLOR_RESET);
+    printf("  %supload%s      Upload a file to a specific folder\n", COLOR_YELLOW, COLOR_RESET);
+    printf("  %slist%s        List files and folders\n", COLOR_YELLOW, COLOR_RESET);
+    printf("  %smkdir%s       Create a new folder\n\n", COLOR_YELLOW, COLOR_RESET);
+    printf("  %spull%s        Download a file or browse interactively\n\n", COLOR_YELLOW, COLOR_RESET);
     
     print_colored("ADDITIONAL COMMANDS\n", COLOR_BOLD);
-    printf("  help        Show help for cdrive\n");
-    printf("  version     Show cdrive version and check for updates\n");
-    printf("  update      Update cdrive to the latest version\n\n");
-    
-    print_colored("AUTHENTICATION COMMANDS\n", COLOR_BOLD);
-    printf("  auth login  Authenticate with Google Drive\n");
-    printf("  auth status Show current authentication status\n\n");
+    printf("  %sversion%s     Show version information and check for updates\n", COLOR_YELLOW, COLOR_RESET);
+    printf("  %supdate%s      Update cdrive to the latest version\n", COLOR_YELLOW, COLOR_RESET);
+    printf("  %shelp%s        Show this help message\n\n", COLOR_YELLOW, COLOR_RESET);
     
     print_colored("EXAMPLES\n", COLOR_BOLD);
-    print_colored("  $ ", COLOR_CYAN);
-    printf("cdrive auth login\n");
-    print_colored("  $ ", COLOR_CYAN);
-    printf("cdrive upload ./file.txt\n");
-    print_colored("  $ ", COLOR_CYAN);
-    printf("cdrive upload ./file.txt parent_folder_id\n");
-    print_colored("  $ ", COLOR_CYAN);
-    printf("cdrive list\n");
-    print_colored("  $ ", COLOR_CYAN);
-    printf("cdrive mkdir \"My Folder\"\n\n");
+    printf("  %s# Authenticate with your Google account%s\n", COLOR_CYAN, COLOR_RESET);
+    printf("  $ cdrive auth login\n\n");
+    printf("  %s# Upload a file to the root folder%s\n", COLOR_CYAN, COLOR_RESET);
+    printf("  $ cdrive upload ./document.pdf\n\n");
+    printf("  %s# List files in a specific folder%s\n", COLOR_CYAN, COLOR_RESET);
+    printf("  $ cdrive list 1BxiMVs...pU\n\n");
+    printf("  %s# Download a file by its ID (filename is fetched automatically)%s\n", COLOR_CYAN, COLOR_RESET);
+    printf("  $ cdrive pull 1BxiMVs...pU\n\n");
+    printf("  %s# Browse files interactively to download%s\n", COLOR_CYAN, COLOR_RESET);
+    printf("  $ cdrive pull\n\n");
     
     print_colored("LEARN MORE\n", COLOR_BOLD);
-    printf("  Use 'cdrive <command> --help' for more information about a command.\n");
+    printf("  Use 'cdrive <command>' for more information about a command.\n");
+    printf("  Find the source code at: %s%s%s\n\n", COLOR_BLUE, GITHUB_RELEASES_URL, COLOR_RESET);
 }

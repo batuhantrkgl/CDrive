@@ -13,23 +13,42 @@ WHITE = \033[37m
 
 # Project configuration
 PROJECT_NAME = cdrive
-VERSION = 1.0.2
-SOURCES = main.c auth.c upload.c spinner.c version.c
+VERSION ?= $(shell grep 'CDRIVE_VERSION' cdrive.h | cut -d'"' -f2)
+SOURCES = main.c auth.c upload.c spinner.c version.c download.c
 
 # Build directories
 OUT_DIR = out
 DIST_DIR = $(OUT_DIR)/dist
 OBJ_DIR = $(OUT_DIR)/obj
+DEP_DIR = $(OBJ_DIR)/deps # For dependency files
 
 # Host system detection
-HOST_OS := $(shell uname -s)
-HOST_ARCH := $(shell uname -m)
+ifeq ($(OS),Windows_NT)
+	HOST_OS_NAME := windows
+	HOST_ARCH := $(PROCESSOR_ARCHITECTURE)
+	ifeq ($(HOST_ARCH),AMD64)
+		HOST_ARCH := x86_64
+	endif
+	ifeq ($(HOST_ARCH),x86)
+		HOST_ARCH := i386
+	endif
+else
+	HOST_OS_NAME := $(shell uname -s | tr '[:upper:]' '[:lower:]')
+	HOST_ARCH := $(shell uname -m)
+endif
+HOST_TARGET = $(HOST_OS_NAME)-$(HOST_ARCH)
 
 # Compiler and flags
 CC ?= gcc
-CFLAGS ?= -Wall -Wextra -std=c99 -O2
+BASE_CFLAGS = -Wall -Wextra -std=c99 -O2
+DEP_FLAGS = -MMD -MP -MF $(DEP_DIR)/$(*F).d
+CFLAGS ?= $(BASE_CFLAGS)
 DEBUG_CFLAGS = -Wall -Wextra -std=c99 -g -DDEBUG
-LIBS ?= -lcurl -ljson-c -lm -lpthread
+
+# Use pkg-config for host build flags
+PKG_LIBS = libcurl json-c
+HOST_CFLAGS = $(shell pkg-config --cflags $(PKG_LIBS))
+HOST_LIBS = $(shell pkg-config --libs $(PKG_LIBS)) -lm -lpthread
 
 # Target platforms for cross-compilation
 TARGETS = \
@@ -53,10 +72,16 @@ CC_darwin-x86_64 = o64-clang
 CC_darwin-arm64 = o64-clang
 
 # Platform-specific settings
-LDFLAGS_windows = -static
-EXT_windows = .exe
-EXT_linux = 
-EXT_darwin = 
+LDFLAGS_windows-x86_64 = -static
+LDFLAGS_windows-i386 = -static
+EXT_windows-x86_64 = .exe
+EXT_windows-i386 = .exe
+
+# Define platform-specific libraries for cross-compilation
+LIBS_windows = -lcurl -ljson-c -lws2_32 -lm
+LIBS_linux = -lcurl -ljson-c -lm -lpthread
+LIBS_darwin = -lcurl -ljson-c -lm -lpthread
+
 
 # Object files
 OBJECTS = $(SOURCES:%.c=$(OBJ_DIR)/%.o)
@@ -65,62 +90,55 @@ OBJECTS = $(SOURCES:%.c=$(OBJ_DIR)/%.o)
 all: $(DIST_DIR)/$(PROJECT_NAME)
 
 # Create directories
-$(OUT_DIR):
-	@mkdir -p $(OUT_DIR)
-
-$(OBJ_DIR): | $(OUT_DIR)
-	@mkdir -p $(OBJ_DIR)
-
-$(DIST_DIR): | $(OUT_DIR)
-	@mkdir -p $(DIST_DIR)
+$(DIST_DIR) $(OBJ_DIR) $(DEP_DIR):
+	@mkdir -p $@
 
 # Build for host system
-$(DIST_DIR)/$(PROJECT_NAME): $(OBJECTS) | $(DIST_DIR)
-	@printf "$(CYAN)Linking $(BOLD)$(PROJECT_NAME)$(RESET)$(CYAN) for $(YELLOW)$(HOST_OS)-$(HOST_ARCH)$(RESET)$(CYAN)...$(RESET)\n"
-	$(CC) $(OBJECTS) -o $@ $(LIBS)
+$(DIST_DIR)/$(PROJECT_NAME): $(OBJECTS) | $(DIST_DIR) $(OBJ_DIR)
+	@printf "$(CYAN)Linking $(BOLD)$(PROJECT_NAME)$(RESET)$(CYAN) for $(YELLOW)$(HOST_TARGET)$(RESET)$(CYAN)...$(RESET)\n"
+	$(CC) $(OBJECTS) -o $@ $(HOST_LIBS)
 	@printf "$(GREEN)Build complete: $(BOLD)$@$(RESET)\n"
 
 # Compile source files
-$(OBJ_DIR)/%.o: %.c cdrive.h | $(OBJ_DIR)
+$(OBJ_DIR)/%.o: %.c | $(OBJ_DIR) $(DEP_DIR)
 	@printf "$(BLUE)Compiling $(BOLD)$<$(RESET)$(BLUE)...$(RESET)\n"
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) $(HOST_CFLAGS) $(DEP_FLAGS) -c $< -o $@
+
+# Include generated dependency files
+-include $(SOURCES:%.c=$(DEP_DIR)/%.d)
 
 # Debug build
 debug: CFLAGS = $(DEBUG_CFLAGS)
-debug: $(DIST_DIR)/$(PROJECT_NAME)-debug
+debug: all
 
-$(DIST_DIR)/$(PROJECT_NAME)-debug: $(OBJECTS) | $(DIST_DIR)
-	@printf "$(MAGENTA)Linking $(BOLD)$(PROJECT_NAME)$(RESET)$(MAGENTA) (debug) for $(YELLOW)$(HOST_OS)-$(HOST_ARCH)$(RESET)$(MAGENTA)...$(RESET)\n"
-	$(CC) $(OBJECTS) -o $@ $(LIBS)
-	@printf "$(GREEN)Debug build complete: $(BOLD)$@$(RESET)\n"
+cross-all: $(addprefix cross-, $(TARGETS))
 
-# Cross-compilation targets
-cross-all: $(TARGETS)
+# Generic rule for cross-compiling. It's inefficient as it recompiles all sources,
+# but centralizes the logic from the CI workflow.
+define cross_compile_rule
+cross-$(1): $(DIST_DIR)/$(PROJECT_NAME)-$(1)$(EXT_$(1))
 
-# Template for cross-compilation
-define cross_compile_template
-$(1): $(DIST_DIR)/$(PROJECT_NAME)-$(1)$(EXT_$(word 1,$(subst -, ,$(1))))
-
-$(DIST_DIR)/$(PROJECT_NAME)-$(1)$(EXT_$(word 1,$(subst -, ,$(1)))): $(SOURCES) cdrive.h | $(DIST_DIR)
+$(DIST_DIR)/$(PROJECT_NAME)-$(1)$(EXT_$(1)): $(SOURCES) cdrive.h | $(DIST_DIR)
 	@printf "$(YELLOW)Cross-compiling for $(BOLD)$(1)$(RESET)$(YELLOW)...$(RESET)\n"
 	@if command -v $(CC_$(1)) >/dev/null 2>&1; then \
-		$(CC_$(1)) $(CFLAGS) $(LDFLAGS_$(word 1,$(subst -, ,$(1)))) $(SOURCES) -o $$@ $(LIBS) && \
-		printf "$(GREEN)Cross-compilation complete: $(BOLD)$$@$(RESET)\n"; \
+		$(CC_$(1)) $(CFLAGS) $(LDFLAGS_$(1)) $(SOURCES) -o $$@ $(LIBS_$(word 1,$(subst -, ,$(1)))) && \
+		printf "$(GREEN)Cross-compilation complete: $(BOLD)$$@$(RESET)\n" || \
+		(printf "$(RED)Cross-compilation failed for $(1)$(RESET)\n"; exit 1); \
 	else \
 		printf "$(RED)Warning: Cross-compiler $(CC_$(1)) not found, skipping $(1)$(RESET)\n"; \
 	fi
 endef
 
 # Generate cross-compilation rules
-$(foreach target,$(TARGETS),$(eval $(call cross_compile_template,$(target))))
+$(foreach target,$(TARGETS),$(eval $(call cross_compile_rule,$(target))))
 
 # Release build - creates archives for distribution
-release: clean cross-all
+release: clean $(addprefix cross-, $(TARGETS))
 	@printf "$(CYAN)Creating release archives...$(RESET)\n"
 	@cd $(DIST_DIR) && \
 	for file in $(PROJECT_NAME)-*; do \
 		if [ -f "$$file" ]; then \
-			platform=$$(echo $$file | sed 's/$(PROJECT_NAME)-//'); \
+			platform=$$(echo $$file | sed 's/$(PROJECT_NAME)-//' | sed 's/\.exe$$//'); \
 			mkdir -p "$$platform"; \
 			cp "$$file" "$$platform/$(PROJECT_NAME)$$(echo $$file | sed 's/.*\(\.[^.]*\)$$/\1/' | grep -E '\.(exe)$$' || echo '')"; \
 			cp ../README.md "$$platform/" 2>/dev/null || echo "# $(PROJECT_NAME)" > "$$platform/README.md"; \
@@ -178,7 +196,7 @@ test: $(DIST_DIR)/$(PROJECT_NAME)
 # Show build info
 info:
 	@printf "$(BOLD)$(CYAN)Project: $(WHITE)$(PROJECT_NAME) v$(VERSION)$(RESET)\n"
-	@printf "$(BOLD)$(BLUE)Host: $(WHITE)$(HOST_OS)-$(HOST_ARCH)$(RESET)\n"
+	@printf "$(BOLD)$(BLUE)Host: $(WHITE)$(HOST_TARGET)$(RESET)\n"
 	@printf "$(BOLD)$(GREEN)Sources: $(WHITE)$(SOURCES)$(RESET)\n"
 	@printf "$(BOLD)$(YELLOW)Output: $(WHITE)$(DIST_DIR)/$(PROJECT_NAME)$(RESET)\n"
 	@printf "$(BOLD)$(MAGENTA)Targets: $(WHITE)$(TARGETS)$(RESET)\n"
@@ -208,4 +226,4 @@ help:
 	@printf "  $(CYAN)$(OBJ_DIR)/$(RESET)     - Object files\n"
 	@printf "  $(CYAN)$(DIST_DIR)/$(RESET)    - Executables and archives\n"
 
-.PHONY: all debug cross-all release clean install uninstall deps check-cross test info help $(TARGETS)
+.PHONY: all debug cross-all release clean install uninstall deps check-cross test info help $(addprefix cross-, $(TARGETS))

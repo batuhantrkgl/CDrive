@@ -1,25 +1,105 @@
 #define _GNU_SOURCE
 #include "cdrive.h"
 
+// Platform-specific function definitions, moved from cdrive.h to be local to this file.
+#ifdef _WIN32 // Windows specific definitions
+    // Initialize Winsock
+    static int init_winsock(void) {
+        WSADATA wsa;
+        if (WSAStartup(MAKEWORD(2,2),&wsa) != 0) {
+            fprintf(stderr, "WSAStartup failed. Error Code : %d\n", WSAGetLastError());
+            return 1;
+        }
+        return 0;
+    }
+    static void cleanup_winsock(void) {
+        WSACleanup();
+    }
+
+    // Windows console handle
+    static HANDLE hConsole = INVALID_HANDLE_VALUE;
+    static DWORD dwOriginalMode = 0;
+    
+    static void init_console(void) {
+        if (hConsole == INVALID_HANDLE_VALUE) {
+            hConsole = GetStdHandle(STD_INPUT_HANDLE); // Use STD_INPUT_HANDLE for console mode functions
+            GetConsoleMode(hConsole, &dwOriginalMode);
+        }
+    }
+    
+    static void enable_raw_mode(void) {
+        init_console();
+        DWORD dwMode = dwOriginalMode;
+        dwMode &= ~(ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT); // Disable echo and line buffering
+        SetConsoleMode(hConsole, dwMode);
+    }
+    
+    static void disable_raw_mode(void) {
+        if (hConsole != INVALID_HANDLE_VALUE) {
+            SetConsoleMode(hConsole, dwOriginalMode);
+        }
+    }
+    
+    static int platform_getchar(void) {
+        return _getch();
+    }
+
+#else // For Linux/macOS (non-Windows)
+    // Dummy Winsock functions for non-Windows
+    static int init_winsock(void) { return 0; }
+    static void cleanup_winsock(void) {}
+
+    // Raw mode functions for Unix-like systems
+    static struct termios original_termios;
+    static int raw_mode_enabled = 0;
+
+    static void enable_raw_mode(void) {
+        if (!raw_mode_enabled) {
+            tcgetattr(STDIN_FILENO, &original_termios);
+            struct termios raw = original_termios;
+            raw.c_lflag &= ~(ECHO | ICANON); // Disable echo and canonical mode
+            raw.c_cc[VMIN] = 1; // Read 1 byte at a time
+            raw.c_cc[VTIME] = 0; // No timeout
+            tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+            raw_mode_enabled = 1;
+        }
+    }
+
+    static void disable_raw_mode(void) {
+        if (raw_mode_enabled) {
+            tcsetattr(STDIN_FILENO, TCSAFLUSH, &original_termios);
+            raw_mode_enabled = 0;
+        }
+    }
+
+    // Unix-like specific getchar
+    static int platform_getchar(void) {
+        int ch;
+        // Raw mode is handled by enable_raw_mode/disable_raw_mode calls in auth.c
+        ch = getchar();
+        return ch;
+    }
+#endif // End of platform-specific block
+
 int show_interactive_menu(const char *question, const char **options, int num_options) {
     int selected = 0;
     char input;
     
     while (1) {
         // Clear screen and position cursor at top
-        printf("\033[2J\033[H");
+        printf("\033[2J\033[1;1H");
         
         // Display question with colored prompt
         print_colored("[?] ", COLOR_CYAN);
         print_colored(question, COLOR_BOLD);
         printf("\n\n");
-        printf("Use %s↑/↓%s arrows to navigate, %sEnter%s to select, %sq%s to quit:\n\n", 
-               COLOR_YELLOW, COLOR_RESET, COLOR_YELLOW, COLOR_RESET, COLOR_YELLOW, COLOR_RESET);
+        printf("  (Use %s↑/↓%s arrows to move, %sEnter%s to select, %s'q'%s to quit)\n\n", 
+               COLOR_YELLOW, COLOR_RESET, COLOR_GREEN, COLOR_RESET, COLOR_RED, COLOR_RESET);
         
         // Display options
         for (int i = 0; i < num_options; i++) {
             if (i == selected) {
-                print_colored("> ", COLOR_GREEN);
+                print_colored("  > ", COLOR_GREEN);
                 print_colored(options[i], COLOR_BOLD);
                 printf("\n");
             } else {
@@ -52,7 +132,7 @@ int show_interactive_menu(const char *question, const char **options, int num_op
             case '\r':
                 disable_raw_mode();
                 // Clear screen and show final selection
-                printf("\033[2J\033[H");
+                printf("\033[2J\033[1;1H");
                 print_colored("[>] ", COLOR_GREEN);
                 print_colored("Selected: ", COLOR_BOLD);
                 printf("%s\n\n", options[selected]);
@@ -60,7 +140,7 @@ int show_interactive_menu(const char *question, const char **options, int num_op
             case 'q':
             case 'Q':
                 disable_raw_mode();
-                printf("\033[2J\033[H");
+                printf("\033[2J\033[1;1H");
                 print_colored("[!] ", COLOR_YELLOW);
                 printf("Authentication cancelled.\n");
                 return -1;
@@ -103,7 +183,9 @@ void print_info(const char *message) {
 }
 
 void print_header(const char *title) {
-    printf("\n%s%s%s\n", COLOR_BOLD, title, COLOR_RESET);
+    printf("\n%s%s %s %s\n", COLOR_BG_BLUE, COLOR_WHITE, title, COLOR_RESET);
+    for (int i = 0; i < (int)strlen(title) + 2; i++) printf("%s-%s", COLOR_BLUE, COLOR_RESET);
+    printf("\n\n");
 }
 
 int setup_config_dir(void) {
@@ -263,8 +345,10 @@ int load_client_credentials(ClientCredentials *creds) {
     return 0;
 }
 
-size_t write_response_callback(void *contents, size_t size, size_t nmemb, APIResponse *response) {
+size_t write_response_callback(char *contents, size_t size, size_t nmemb, void *userp) {
     size_t total_size = size * nmemb;
+    APIResponse *response = (APIResponse *)userp;
+
     char *new_data = realloc(response->data, response->size + total_size + 1);
     
     if (!new_data) {
@@ -348,10 +432,10 @@ int start_local_server(char *auth_code, const char *auth_url, int open_browser) 
         stop_spinner(&spinner);
         
 #ifdef _WIN32
-        char open_cmd[MAX_URL_SIZE];
+        char open_cmd[MAX_CMD_SIZE];
         snprintf(open_cmd, sizeof(open_cmd), "start \"\" \"%s\"", auth_url);
 #else
-        char open_cmd[MAX_URL_SIZE];
+        char open_cmd[MAX_CMD_SIZE];
         snprintf(open_cmd, sizeof(open_cmd), "xdg-open \"%s\" 2>/dev/null || open \"%s\" 2>/dev/null", 
                  auth_url, auth_url);
 #endif
@@ -515,6 +599,75 @@ static int exchange_code_for_tokens(const char *auth_code, OAuthTokens *tokens) 
     return strlen(tokens->access_token) > 0 ? 0 : -1;
 }
 
+int refresh_access_token(OAuthTokens *tokens) {
+    CURL *curl;
+    CURLcode res;
+    APIResponse response = {0};
+
+    if (strlen(tokens->refresh_token) == 0) {
+        // No refresh token, can't proceed.
+        return -1;
+    }
+
+    // Load client credentials if not already loaded
+    if (strlen(g_client_creds.client_id) == 0) {
+        if (load_client_credentials(&g_client_creds) != 0) {
+            return -1;
+        }
+    }
+
+    curl = curl_easy_init();
+    if (!curl) {
+        print_error("Error initializing curl for token refresh");
+        return -1;
+    }
+
+    // Prepare POST data
+    char post_data[2048];
+    snprintf(post_data, sizeof(post_data),
+        "client_id=%s&client_secret=%s&refresh_token=%s&grant_type=refresh_token",
+        g_client_creds.client_id, g_client_creds.client_secret, tokens->refresh_token);
+
+    // Set curl options
+    curl_easy_setopt(curl, CURLOPT_URL, OAUTH_TOKEN_URL);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post_data);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_response_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+
+    // Perform request
+    res = curl_easy_perform(curl);
+
+    long http_code = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+    curl_easy_cleanup(curl);
+
+    if (res != CURLE_OK || http_code != 200) {
+        if (response.data) free(response.data);
+        return -1;
+    }
+
+    // Parse JSON response
+    json_object *root = json_tokener_parse(response.data);
+    if (!root) {
+        if (response.data) free(response.data);
+        return -1;
+    }
+
+    json_object *access_token_obj, *expires_in_obj;
+    if (json_object_object_get_ex(root, "access_token", &access_token_obj)) {
+        strncpy(tokens->access_token, json_object_get_string(access_token_obj), sizeof(tokens->access_token) - 1);
+    }
+
+    if (json_object_object_get_ex(root, "expires_in", &expires_in_obj)) {
+        tokens->expires_in = json_object_get_int(expires_in_obj);
+    }
+
+    json_object_put(root);
+    if (response.data) free(response.data);
+
+    return 0;
+}
+
 int cdrive_auth_login(int headless) {
     char auth_url[MAX_URL_SIZE];
     char auth_code[256] = {0};
@@ -673,7 +826,7 @@ int cdrive_auth_login(int headless) {
             sleep(1); // Give server time to start
 
             // Open browser
-            char open_cmd[MAX_URL_SIZE];
+            char open_cmd[MAX_CMD_SIZE];
             snprintf(open_cmd, sizeof(open_cmd), "xdg-open \"%s\" 2>/dev/null || open \"%s\" 2>/dev/null",
                      auth_url, auth_url);
             print_colored("\n[>] ", COLOR_GREEN);
@@ -719,7 +872,7 @@ int cdrive_auth_login(int headless) {
             print_warning("Could not fork process, using fallback method");
 
             // Open browser
-            char open_cmd[MAX_URL_SIZE];
+            char open_cmd[MAX_CMD_SIZE];
             snprintf(open_cmd, sizeof(open_cmd), "xdg-open \"%s\" 2>/dev/null || open \"%s\" 2>/dev/null",
                      auth_url, auth_url);
             print_colored("\n[>] ", COLOR_GREEN);
@@ -844,41 +997,60 @@ int get_user_info(char *user_name, size_t name_size) {
     CURL *curl;
     CURLcode res;
     APIResponse response = {0};
-    
-    if (strlen(g_tokens.access_token) == 0) {
-        return -1;
+    long http_code = 0;
+
+    for (int attempt = 0; attempt < 2; attempt++) {
+        if (attempt == 0) {
+            if (strlen(g_tokens.access_token) == 0) {
+                return -1; // No token to use
+            }
+        } else {
+            // Refresh token on second attempt
+            if (refresh_access_token(&g_tokens) != 0 || save_tokens(&g_tokens) != 0) {
+                break; // Failed to refresh, exit loop
+            }
+        }
+
+        curl = curl_easy_init();
+        if (!curl) return -1;
+
+        char auth_header[MAX_HEADER_SIZE];
+        snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", g_tokens.access_token);
+        struct curl_slist *headers = NULL;
+        headers = curl_slist_append(headers, auth_header);
+
+        curl_easy_setopt(curl, CURLOPT_URL, "https://www.googleapis.com/drive/v3/about?fields=user");
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_response_callback);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+
+        res = curl_easy_perform(curl);
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+
+        curl_slist_free_all(headers);
+        curl_easy_cleanup(curl);
+
+        if (res == CURLE_OK && http_code == 200) {
+            break; // Success
+        }
+
+        if (res != CURLE_OK || (http_code != 401 && http_code != 403)) {
+            break; // Non-auth error
+        }
+
+        // Auth error, loop will retry after refresh
+        if (response.data) {
+            free(response.data);
+            response.data = NULL;
+            response.size = 0;
+        }
     }
-    
-    curl = curl_easy_init();
-    if (!curl) {
-        return -1;
-    }
-    
-    // Set up authorization header
-    char auth_header[MAX_TOKEN_SIZE];
-    snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", g_tokens.access_token);
-    
-    struct curl_slist *headers = NULL;
-    headers = curl_slist_append(headers, auth_header);
-    
-    // Configure curl to get user info from Google Drive API
-    curl_easy_setopt(curl, CURLOPT_URL, "https://www.googleapis.com/drive/v3/about?fields=user");
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_response_callback);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
-    
-    // Perform request
-    res = curl_easy_perform(curl);
-    
-    // Clean up
-    curl_slist_free_all(headers);
-    curl_easy_cleanup(curl);
-    
-    if (res != CURLE_OK) {
+
+    if (res != CURLE_OK || http_code != 200) {
         if (response.data) free(response.data);
         return -1;
     }
-    
+
     // Parse response to get user name
     if (response.data) {
         json_object *root = json_tokener_parse(response.data);

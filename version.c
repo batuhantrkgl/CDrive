@@ -491,6 +491,7 @@ struct DownloadProgress {
     LoadingSpinner *spinner;
     size_t total_size;
     size_t downloaded;
+    int has_started;
     time_t last_update;
 };
 
@@ -500,33 +501,35 @@ static int download_progress_callback(void *clientp, curl_off_t dltotal, curl_of
     (void)ulnow;
     
     struct DownloadProgress *progress = (struct DownloadProgress *)clientp;
-    time_t now = time(NULL);
     
-    // Update every second
-    if (now > progress->last_update) {
+    if (dltotal <= 0) return 0;
+
+    // On the first call, print a newline to not overwrite the "Downloading..." message
+    if (!progress->has_started) {
+        printf("\n");
+        progress->has_started = 1;
+    }
+
+    time_t now = time(NULL);
+    if (now > progress->last_update || dlnow == dltotal) {
         progress->last_update = now;
         
-        if (dltotal > 0) {
-            double percent = (double)dlnow / (double)dltotal * 100.0;
-            char progress_msg[256];
-            
-            if (dltotal > 1024 * 1024) {
-                snprintf(progress_msg, sizeof(progress_msg), 
-                         "Downloading... %.1f%% (%.1f MB / %.1f MB)",
-                         percent, (double)dlnow / (1024*1024), (double)dltotal / (1024*1024));
-            } else if (dltotal > 1024) {
-                snprintf(progress_msg, sizeof(progress_msg), 
-                         "Downloading... %.1f%% (%.1f KB / %.1f KB)",
-                         percent, (double)dlnow / 1024, (double)dltotal / 1024);
-            } else {
-                snprintf(progress_msg, sizeof(progress_msg), 
-                         "Downloading... %.1f%% (%ld B / %ld B)",
-                         percent, (long)dlnow, (long)dltotal);
-            }
-            
-            // Update spinner message (we'd need to modify spinner for this to work)
-            // For now, just continue with existing spinner
+        double percent = (double)dlnow / (double)dltotal * 100.0;
+        int bar_width = 40;
+        int pos = bar_width * (percent / 100.0);
+
+        printf("\r%s[", COLOR_GREEN);
+        for (int i = 0; i < bar_width; ++i) {
+            if (i < pos) printf("=");
+            else if (i == pos) printf(">");
+            else printf(" ");
         }
+        printf("] %s%.1f%% ", COLOR_RESET, percent);
+
+        // Print downloaded/total size
+        printf("(%.1f/%.1f MB)", (double)dlnow / (1024*1024), (double)dltotal / (1024*1024));
+        
+        fflush(stdout);
     }
     
     return 0;
@@ -546,9 +549,9 @@ int download_and_install_update(const UpdateInfo *update_info, int auto_install)
     printf("Downloading cdrive %s...\n", update_info->version);
     
     // Create temporary file with better naming
-    char temp_file[512];
+    char temp_file[1024];
     char temp_dir[256];
-    char extracted_file[512];
+    char extracted_file[1024];
     
 #ifdef _WIN32
     const char *env_temp = getenv("TEMP");
@@ -583,11 +586,7 @@ int download_and_install_update(const UpdateInfo *update_info, int auto_install)
     // Set up progress tracking
     struct DownloadProgress progress = {0};
     progress.last_update = time(NULL);
-    
-    // Start download spinner
-    LoadingSpinner spinner = {0};
-    start_spinner(&spinner, "Downloading...");
-    progress.spinner = &spinner;
+    progress.has_started = 0;
     
     // Configure curl for download
     curl_easy_setopt(curl, CURLOPT_URL, update_info->download_url);
@@ -606,11 +605,12 @@ int download_and_install_update(const UpdateInfo *update_info, int auto_install)
     
     CURLcode res = curl_easy_perform(curl);
     
+    printf("\n"); // Newline after progress bar is complete
+
     // Check HTTP status
     long http_code = 0;
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
     
-    stop_spinner(&spinner);
     fclose(fp);
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
@@ -663,7 +663,7 @@ int download_and_install_update(const UpdateInfo *update_info, int auto_install)
     }
     
     // Extract using tar command
-    char extract_cmd[1024];
+    char extract_cmd[4096];
     snprintf(extract_cmd, sizeof(extract_cmd), "tar -xzf \"%s\" -C \"%s\"", temp_file, extracted_file);
     
     int extract_result = system(extract_cmd);
@@ -676,7 +676,7 @@ int download_and_install_update(const UpdateInfo *update_info, int auto_install)
     }
     
     // Find the extracted binary
-    char binary_path[512];
+    char binary_path[2048];
     snprintf(binary_path, sizeof(binary_path), "%s/cdrive", extracted_file);
     
     // Check if binary exists
@@ -796,7 +796,7 @@ int download_and_install_update(const UpdateInfo *update_info, int auto_install)
             
             // Clean up temp files
             unlink(temp_file);
-            char cleanup_cmd[1024];
+            char cleanup_cmd[2048];
             snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf \"%s\"", extracted_file);
             system(cleanup_cmd);
         } else {

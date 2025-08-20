@@ -9,6 +9,7 @@
 #include <pthread.h>
 #include <curl/curl.h>
 #include <json-c/json.h>
+#include "download.h"
 
 // Platform-specific includes
 #ifdef _WIN32 // Windows specific definitions
@@ -26,47 +27,10 @@
     #define HOME_ENV "USERPROFILE"
     #define STDIN_FILENO 0
     #define close(fd) closesocket(fd) // For socket handles
+    #define strcasecmp _stricmp
     #define read(fd, buf, len) recv(fd, buf, len, 0) // For socket handles
     #define write(fd, buf, len) send(fd, buf, len, 0) // For socket handles
     typedef int socklen_t;
-    
-    // Initialize Winsock
-    static int init_winsock(void) {
-        WSADATA wsa;
-        if (WSAStartup(MAKEWORD(2,2),&wsa) != 0) {
-            fprintf(stderr, "WSAStartup failed. Error Code : %d\n", WSAGetLastError());
-            return 1;
-        }
-        return 0;
-    }
-    static void cleanup_winsock(void) {
-        WSACleanup();
-    }
-
-    // Windows console handle
-    static HANDLE hConsole = INVALID_HANDLE_VALUE;
-    static DWORD dwOriginalMode = 0;
-    
-    static void init_console(void) {
-        if (hConsole == INVALID_HANDLE_VALUE) {
-            hConsole = GetStdHandle(STD_INPUT_HANDLE); // Use STD_INPUT_HANDLE for console mode functions
-            GetConsoleMode(hConsole, &dwOriginalMode);
-        }
-    }
-    
-    static void enable_raw_mode(void) {
-        init_console();
-        DWORD dwMode = dwOriginalMode;
-        dwMode &= ~(ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT); // Disable echo and line buffering
-        SetConsoleMode(hConsole, dwMode);
-    }
-    
-    static void disable_raw_mode(void) {
-        if (hConsole != INVALID_HANDLE_VALUE) {
-            SetConsoleMode(hConsole, dwOriginalMode);
-        }
-    }
-    #define platform_getchar _getch // Windows specific getchar
 
 #else // For Linux/macOS (non-Windows)
     #include <sys/stat.h> // For mkdir, stat
@@ -78,46 +42,13 @@
 
     #define PATH_SEP "/"
     #define HOME_ENV "HOME"
-
-    // Dummy Winsock functions for non-Windows
-    static int init_winsock(void) { return 0; }
-    static void cleanup_winsock(void) {}
-
-    // Raw mode functions for Unix-like systems
-    static struct termios original_termios;
-    static int raw_mode_enabled = 0;
-
-    static void enable_raw_mode(void) {
-        if (!raw_mode_enabled) {
-            tcgetattr(STDIN_FILENO, &original_termios);
-            struct termios raw = original_termios;
-            raw.c_lflag &= ~(ECHO | ICANON); // Disable echo and canonical mode
-            raw.c_cc[VMIN] = 1; // Read 1 byte at a time
-            raw.c_cc[VTIME] = 0; // No timeout
-            tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
-            raw_mode_enabled = 1;
-        }
-    }
-
-    static void disable_raw_mode(void) {
-        if (raw_mode_enabled) {
-            tcsetattr(STDIN_FILENO, TCSAFLUSH, &original_termios);
-            raw_mode_enabled = 0;
-        }
-    }
-
-    // Unix-like specific getchar
-    static int platform_getchar(void) {
-        int ch;
-        // Raw mode is handled by enable_raw_mode/disable_raw_mode calls in auth.c
-        ch = getchar();
-        return ch;
-    }
 #endif // End of platform-specific block
 
 // Constants
 #define MAX_URL_SIZE 2048
 #define MAX_TOKEN_SIZE 1024
+#define MAX_HEADER_SIZE (MAX_TOKEN_SIZE + 100)
+#define MAX_CMD_SIZE (MAX_URL_SIZE * 2 + 100)
 #define MAX_PATH_SIZE 512
 #define MAX_RESPONSE_SIZE 8192
 #define CONFIG_DIR ".cdrive"
@@ -129,6 +60,7 @@
 // Colors for terminal output
 #define COLOR_RESET     "\033[0m"
 #define COLOR_BOLD      "\033[1m"
+#define COLOR_BOLD_GREEN "\033[1;32m"
 #define COLOR_RED       "\033[31m"
 #define COLOR_GREEN     "\033[32m"
 #define COLOR_YELLOW    "\033[33m"
@@ -212,7 +144,7 @@ int load_client_credentials(ClientCredentials *creds);
 int refresh_access_token(OAuthTokens *tokens);
 int get_user_info(char *user_name, size_t name_size);
 char *get_file_mime_type(const char *filename);
-size_t write_response_callback(void *contents, size_t size, size_t nmemb, APIResponse *response);
+size_t write_response_callback(char *contents, size_t size, size_t nmemb, void *userp);
 void print_usage(void);
 void print_version(void);
 void print_version_with_update_check(void);
