@@ -193,6 +193,23 @@ cdrive --help
 | `cdrive --version` | Show version information |
 | `cdrive --help` | Show help information |
 
+### Using CDrive over SSH
+
+If you are running CDrive on a remote server via SSH, the browser-based authentication flow requires an extra step. The application listens on `localhost:8080` on the remote server to complete the login. To make this accessible from your local browser, you must use SSH local port forwarding.
+
+Connect to your server using the `-L` flag to forward the port:
+
+```bash
+ssh -L 8080:localhost:8080 user@your_server_ip
+```
+
+Once connected, you can run `cdrive auth login` as usual. When you open the authentication URL in your local browser, it will be able to connect back to the CDrive application running on the server.
+
+Alternatively, you can use the headless mode, which does not require port forwarding:
+```bash
+cdrive auth login --no-browser
+```
+
 ## Configuration
 
 ### Setting up Google Drive API
@@ -210,7 +227,7 @@ cdrive --help
    - Go to "APIs & Services" > "Credentials"
    - Click "Create Credentials" > "OAuth client ID"
    - Choose "Desktop application"
-   - Add the redirect URI: `http://localhost:8080/callback`
+   - Add the redirect URI: `http://localhost:8080`
    - Download the JSON file
 
 4. **Configure CDrive:**

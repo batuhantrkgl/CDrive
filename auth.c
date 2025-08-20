@@ -156,7 +156,7 @@ static int interactive_credential_setup(void) {
         printf("   - Go to APIs & Services > Credentials\n");
         printf("   - Click %s'Create Credentials' > 'OAuth 2.0 Client IDs'%s\n", COLOR_BLUE, COLOR_RESET);
         printf("   - Choose %s'Desktop application'%s\n", COLOR_BLUE, COLOR_RESET);
-        printf("   - Add redirect URI: %shttp://localhost:8080/callback%s\n", COLOR_YELLOW, COLOR_RESET);
+        printf("   - Add redirect URI: %shttp://localhost:8080%s\n", COLOR_YELLOW, COLOR_RESET);
         printf("%s5. Download the credentials JSON file%s\n\n", COLOR_BOLD, COLOR_RESET);
         printf("Tip: Look for 'client_id' and 'client_secret' in the downloaded JSON\n\n");
         printf("After setup, run %s'cdrive auth login'%s again.\n", COLOR_YELLOW, COLOR_RESET);
@@ -348,10 +348,10 @@ int start_local_server(char *auth_code, const char *auth_url, int open_browser) 
         stop_spinner(&spinner);
         
 #ifdef _WIN32
-        char open_cmd[1024];
+        char open_cmd[MAX_URL_SIZE];
         snprintf(open_cmd, sizeof(open_cmd), "start \"\" \"%s\"", auth_url);
 #else
-        char open_cmd[1024];
+        char open_cmd[MAX_URL_SIZE];
         snprintf(open_cmd, sizeof(open_cmd), "xdg-open \"%s\" 2>/dev/null || open \"%s\" 2>/dev/null", 
                  auth_url, auth_url);
 #endif
@@ -515,207 +515,261 @@ static int exchange_code_for_tokens(const char *auth_code, OAuthTokens *tokens) 
     return strlen(tokens->access_token) > 0 ? 0 : -1;
 }
 
-int cdrive_auth_login(void) {
+int cdrive_auth_login(int headless) {
     char auth_url[MAX_URL_SIZE];
     char auth_code[256] = {0};
     OAuthTokens tokens = {0};
-    
+
     printf("\n");
-    
+
     // Load client credentials (will prompt interactively if not found)
     if (load_client_credentials(&g_client_creds) != 0) {
         return -1;
     }
-    
+
     // Check if credentials were loaded properly
     if (strlen(g_client_creds.client_id) < 10) {
         print_error("Invalid or missing client_id. Please check your credentials.");
         printf("Current client_id length: %zu\n", strlen(g_client_creds.client_id));
         return -1;
     }
-    
+
     if (strlen(g_client_creds.client_secret) < 10) {
         print_error("Invalid or missing client_secret. Please check your credentials.");
         return -1;
     }
-    
+
     print_colored("[+] ", COLOR_GREEN);
     printf("Client credentials loaded successfully\n");
-    
+
+    // Check if running in an SSH session and provide guidance
+    if (!headless && (getenv("SSH_CLIENT") || getenv("SSH_CONNECTION"))) {
+        printf("\n");
+        print_warning("It looks like you're running in an SSH session.");
+        printf("\n");
+        print_info("For browser authentication to work, you must forward port 8080 from your");
+        print_info("local machine to this server. You can do this when you connect via SSH.");
+        printf("\n");
+        print_colored("  $ ", COLOR_CYAN);
+        printf("ssh -L 8080:localhost:8080 user@your_server_ip\n\n");
+        print_info("If you have already done this, you can proceed.");
+        print_info("If not, please exit (Ctrl+C), reconnect with the command above,");
+        print_info("and then run 'cdrive auth login' again.");
+        printf("\n");
+    }
+
     print_colored("[*] ", COLOR_BLUE);
     printf("Starting Google Drive authentication...\n\n");
-    
+
     // URL encode parameters
     char *encoded_redirect = url_encode(REDIRECT_URI);
     char *encoded_scope = url_encode(SCOPE);
-    
+
     if (!encoded_redirect || !encoded_scope) {
         print_error("Error encoding parameters");
         return -1;
     }
-    
+
     // Build authorization URL
     snprintf(auth_url, sizeof(auth_url),
         "%s?client_id=%s&redirect_uri=%s&scope=%s&response_type=code&access_type=offline&prompt=consent",
         OAUTH_AUTH_URL, g_client_creds.client_id, encoded_redirect, encoded_scope);
-    
+
     free(encoded_redirect);
     free(encoded_scope);
-    
-    print_warning("First, authenticate in your web browser");
-    printf("Press ");
-    print_colored("Enter", COLOR_BOLD);
-    printf(" to open Google's authorization page in your browser...\n\n");
-    
-    // Wait for user to press Enter
-    getchar();
-    
-    // Start local server to receive callback FIRST
-    print_colored("[*] ", COLOR_BLUE);
-    printf("Starting local server on port 8080...\n");
-    
-    // Initialize socket subsystem
-    if (init_winsock() != 0) {
-        print_error("Failed to initialize network subsystem");
-        return -1;
-    }
-    
-#ifdef _WIN32
-    // Windows: Use simple synchronous approach (no fork)
-    // Start server and wait for callback (spinner is handled inside start_local_server)
-    if (start_local_server(auth_code, auth_url, 1) != 0) {
-        print_error("Failed to receive authorization callback");
-        cleanup_winsock();
-        return -1;
-    }
-    
-#else
-    // Unix/Linux: Use fork-based approach for concurrent server and browser
-    // Create a pipe for IPC
-    int pipefd[2];
-    if (pipe(pipefd) == -1) {
-        perror("pipe failed");
-        cleanup_winsock();
-        return -1;
-    }
-    
-    // Create a separate process for the server
-    pid_t server_pid = fork();
-    if (server_pid == 0) {
-        // Child process - run the server
-        close(pipefd[0]); // Close read end in child
-        
-        char temp_auth_code[256] = {0};
-        int result = start_local_server(temp_auth_code, auth_url, 0);
-        
-        if (result == 0 && strlen(temp_auth_code) > 0) {
-            // Send the auth code to parent via pipe
-            write(pipefd[1], temp_auth_code, strlen(temp_auth_code));
-        }
-        
-        close(pipefd[1]);
-        exit(result);
-    } else if (server_pid > 0) {
-        // Parent process - wait a moment for server to start, then open browser
-        close(pipefd[1]); // Close write end in parent
-        sleep(1); // Give server time to start
-        
-        // Open browser
-        char open_cmd[1024];
-        snprintf(open_cmd, sizeof(open_cmd), "xdg-open \"%s\" 2>/dev/null || open \"%s\" 2>/dev/null", 
-                 auth_url, auth_url);
-        print_colored("\n[>] ", COLOR_GREEN);
-        printf("Opening browser...\n");
-        int browser_result = system(open_cmd);
-        
-        if (browser_result != 0) {
-            print_warning("Could not automatically open browser. Please copy the URL above and paste it into your browser manually.");
-        }
-        
-        // Start spinner for waiting
-        LoadingSpinner auth_spinner = {0};
-        start_spinner(&auth_spinner, "Waiting for authentication callback...");
-        
-        // Wait for the child process to complete
-        int status;
-        waitpid(server_pid, &status, 0);
-        
-        stop_spinner(&auth_spinner);
-        
-        if (WEXITSTATUS(status) != 0) {
-            print_error("Failed to receive authorization callback");
-            close(pipefd[0]);
-            cleanup_winsock();
+
+    if (headless) {
+        print_warning("Running in headless mode. Please follow the instructions below.");
+        printf("\n");
+        print_info("1. Open the following URL in your browser:");
+        printf("%s\n\n", auth_url);
+        print_info("2. After authenticating, you will be redirected to a URL that looks like 'http://localhost:8080/?code=...'.");
+        print_info("3. Copy the entire redirected URL from your browser's address bar and paste it below.");
+        printf("\n");
+
+        char redirected_url[MAX_URL_SIZE];
+        printf("%s? Enter the redirected URL:%s ", COLOR_CYAN, COLOR_RESET);
+        if (!fgets(redirected_url, sizeof(redirected_url), stdin)) {
+            print_error("Failed to read the redirected URL.");
             return -1;
         }
-        
-        // Read the auth code from the pipe
-        ssize_t bytes_read = read(pipefd[0], auth_code, sizeof(auth_code) - 1);
-        close(pipefd[0]);
-        
-        if (bytes_read <= 0) {
-            print_error("Failed to receive authorization code from server process");
-            cleanup_winsock();
-            return -1;
+        redirected_url[strcspn(redirected_url, "\n")] = 0; // Remove newline
+
+        char *code_start = strstr(redirected_url, "code=");
+        if (code_start) {
+            code_start += 5; // Skip "code="
+            char *code_end = strchr(code_start, '&');
+            if (!code_end) {
+                code_end = strchr(code_start, ' ');
+            }
+            if (code_end) {
+                size_t code_length = code_end - code_start;
+                strncpy(auth_code, code_start, code_length);
+                auth_code[code_length] = '\0';
+            } else {
+                // if no '&' or ' ' is found, the code is the rest of the string
+                strncpy(auth_code, code_start, sizeof(auth_code) - 1);
+                auth_code[sizeof(auth_code) - 1] = '\0';
+            }
         }
-        
-        auth_code[bytes_read] = '\0';
+
     } else {
-        // Fork failed, fallback to original method
-        close(pipefd[0]);
-        close(pipefd[1]);
-        print_warning("Could not fork process, using fallback method");
-        
-        // Open browser
-        char open_cmd[1024];
-        snprintf(open_cmd, sizeof(open_cmd), "xdg-open \"%s\" 2>/dev/null || open \"%s\" 2>/dev/null", 
-                 auth_url, auth_url);
-        print_colored("\n[>] ", COLOR_GREEN);
-        printf("Opening browser...\n");
-        system(open_cmd);
-        
-        // Start spinner for waiting
-        LoadingSpinner auth_spinner = {0};
-        start_spinner(&auth_spinner, "Waiting for authentication callback...");
-        
-        // Start local server to receive callback
+        print_warning("First, authenticate in your web browser");
+        printf("Press ");
+        print_colored("Enter", COLOR_BOLD);
+        printf(" to open Google's authorization page in your browser...\n\n");
+
+        // Wait for user to press Enter
+        getchar();
+
+        // Start local server to receive callback FIRST
+        print_colored("[*] ", COLOR_BLUE);
+        printf("Starting local server on port 8080...\n");
+
+        // Initialize socket subsystem
+        if (init_winsock() != 0) {
+            print_error("Failed to initialize network subsystem");
+            return -1;
+        }
+
+#ifdef _WIN32
+        // Windows: Use simple synchronous approach (no fork)
+        // Start server and wait for callback (spinner is handled inside start_local_server)
         if (start_local_server(auth_code, auth_url, 1) != 0) {
-            stop_spinner(&auth_spinner);
             print_error("Failed to receive authorization callback");
             cleanup_winsock();
             return -1;
         }
-        
-        stop_spinner(&auth_spinner);
-    }
+
+#else
+        // Unix/Linux: Use fork-based approach for concurrent server and browser
+        // Create a pipe for IPC
+        int pipefd[2];
+        if (pipe(pipefd) == -1) {
+            perror("pipe failed");
+            cleanup_winsock();
+            return -1;
+        }
+
+        // Create a separate process for the server
+        pid_t server_pid = fork();
+        if (server_pid == 0) {
+            // Child process - run the server
+            close(pipefd[0]); // Close read end in child
+
+            char temp_auth_code[256] = {0};
+            int result = start_local_server(temp_auth_code, auth_url, 0);
+
+            if (result == 0 && strlen(temp_auth_code) > 0) {
+                // Send the auth code to parent via pipe
+                write(pipefd[1], temp_auth_code, strlen(temp_auth_code));
+            }
+
+            close(pipefd[1]);
+            exit(result);
+        } else if (server_pid > 0) {
+            // Parent process - wait a moment for server to start, then open browser
+            close(pipefd[1]); // Close write end in parent
+            sleep(1); // Give server time to start
+
+            // Open browser
+            char open_cmd[MAX_URL_SIZE];
+            snprintf(open_cmd, sizeof(open_cmd), "xdg-open \"%s\" 2>/dev/null || open \"%s\" 2>/dev/null",
+                     auth_url, auth_url);
+            print_colored("\n[>] ", COLOR_GREEN);
+            printf("Opening browser...\n");
+            int browser_result = system(open_cmd);
+
+            if (browser_result != 0) {
+                print_warning("Could not automatically open browser. Please copy the URL above and paste it into your browser manually.");
+            }
+
+            // Start spinner for waiting
+            LoadingSpinner auth_spinner = {0};
+            start_spinner(&auth_spinner, "Waiting for authentication callback...");
+
+            // Wait for the child process to complete
+            int status;
+            waitpid(server_pid, &status, 0);
+
+            stop_spinner(&auth_spinner);
+
+            if (WEXITSTATUS(status) != 0) {
+                print_error("Failed to receive authorization callback");
+                close(pipefd[0]);
+                cleanup_winsock();
+                return -1;
+            }
+
+            // Read the auth code from the pipe
+            ssize_t bytes_read = read(pipefd[0], auth_code, sizeof(auth_code) - 1);
+            close(pipefd[0]);
+
+            if (bytes_read <= 0) {
+                print_error("Failed to receive authorization code from server process");
+                cleanup_winsock();
+                return -1;
+            }
+
+            auth_code[bytes_read] = '\0';
+        } else {
+            // Fork failed, fallback to original method
+            close(pipefd[0]);
+            close(pipefd[1]);
+            print_warning("Could not fork process, using fallback method");
+
+            // Open browser
+            char open_cmd[MAX_URL_SIZE];
+            snprintf(open_cmd, sizeof(open_cmd), "xdg-open \"%s\" 2>/dev/null || open \"%s\" 2>/dev/null",
+                     auth_url, auth_url);
+            print_colored("\n[>] ", COLOR_GREEN);
+            printf("Opening browser...\n");
+            system(open_cmd);
+
+            // Start spinner for waiting
+            LoadingSpinner auth_spinner = {0};
+            start_spinner(&auth_spinner, "Waiting for authentication callback...");
+
+            // Start local server to receive callback
+            if (start_local_server(auth_code, auth_url, 1) != 0) {
+                stop_spinner(&auth_spinner);
+                print_error("Failed to receive authorization callback");
+                cleanup_winsock();
+                return -1;
+            }
+
+            stop_spinner(&auth_spinner);
+        }
 #endif
-    
-    cleanup_winsock();
-    
+
+        cleanup_winsock();
+    }
+
     if (strlen(auth_code) == 0) {
         print_error("Authorization code is empty");
         return -1;
     }
-    
+
     print_success("Authorization code received");
-    
+
     // Exchange code for tokens
     if (exchange_code_for_tokens(auth_code, &tokens) != 0) {
         print_error("Failed to exchange authorization code for tokens");
         return -1;
     }
-    
+
     // Save tokens
     if (save_tokens(&tokens) != 0) {
         print_error("Failed to save tokens");
         return -1;
     }
-    
+
     // Update global tokens
     g_tokens = tokens;
-    
+
     return 0;
 }
+
 
 int save_tokens(const OAuthTokens *tokens) {
     char token_path[MAX_PATH_SIZE];
@@ -801,7 +855,7 @@ int get_user_info(char *user_name, size_t name_size) {
     }
     
     // Set up authorization header
-    char auth_header[1024];
+    char auth_header[MAX_TOKEN_SIZE];
     snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", g_tokens.access_token);
     
     struct curl_slist *headers = NULL;

@@ -11,59 +11,45 @@
 #include <json-c/json.h>
 
 // Platform-specific includes
-#ifdef _WIN32
+#ifdef _WIN32 // Windows specific definitions
     #include <windows.h>
     #include <winsock2.h>
     #include <ws2tcpip.h>
     #include <conio.h>
     #include <direct.h>
     #include <io.h>
-    #include <sys/stat.h>
+    #include <sys/stat.h> // For stat, _mkdir
     #define mkdir(path, mode) _mkdir(path)
     #define access(path, mode) _access(path, mode)
     #define F_OK 0
     #define PATH_SEP "\\"
     #define HOME_ENV "USERPROFILE"
     #define STDIN_FILENO 0
-    #define close(fd) closesocket(fd)
-    #define read(fd, buf, len) recv(fd, buf, len, 0)
-    #define write(fd, buf, len) send(fd, buf, len, 0)
+    #define close(fd) closesocket(fd) // For socket handles
+    #define read(fd, buf, len) recv(fd, buf, len, 0) // For socket handles
+    #define write(fd, buf, len) send(fd, buf, len, 0) // For socket handles
     typedef int socklen_t;
     
     // Initialize Winsock
     static int init_winsock(void) {
-        WSADATA wsaData;
-        return WSAStartup(MAKEWORD(2,2), &wsaData);
+        WSADATA wsa;
+        if (WSAStartup(MAKEWORD(2,2),&wsa) != 0) {
+            fprintf(stderr, "WSAStartup failed. Error Code : %d\n", WSAGetLastError());
+            return 1;
+        }
+        return 0;
     }
-    
     static void cleanup_winsock(void) {
         WSACleanup();
     }
-#else
-    #include <unistd.h>
-    #include <sys/stat.h>
-    #include <termios.h>
-    #include <sys/socket.h>
-    #include <netinet/in.h>
-    #include <arpa/inet.h>
-    #include <sys/wait.h>
-    #include <sys/types.h>
-    #define PATH_SEP "/"
-    #define HOME_ENV "HOME"
-    
-    static int init_winsock(void) { return 0; }
-    static void cleanup_winsock(void) { }
-#endif
 
-// Cross-platform terminal functions
-#ifdef _WIN32
     // Windows console handle
     static HANDLE hConsole = INVALID_HANDLE_VALUE;
     static DWORD dwOriginalMode = 0;
     
     static void init_console(void) {
         if (hConsole == INVALID_HANDLE_VALUE) {
-            hConsole = GetStdHandle(STD_INPUT_HANDLE);
+            hConsole = GetStdHandle(STD_INPUT_HANDLE); // Use STD_INPUT_HANDLE for console mode functions
             GetConsoleMode(hConsole, &dwOriginalMode);
         }
     }
@@ -71,7 +57,7 @@
     static void enable_raw_mode(void) {
         init_console();
         DWORD dwMode = dwOriginalMode;
-        dwMode &= ~(ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT);
+        dwMode &= ~(ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT); // Disable echo and line buffering
         SetConsoleMode(hConsole, dwMode);
     }
     
@@ -80,29 +66,54 @@
             SetConsoleMode(hConsole, dwOriginalMode);
         }
     }
-    
-    static int platform_getchar(void) {
-        return _getch();
-    }
-#else
-    // Unix/Linux termios functions
-    static struct termios orig_termios;
-    
+    #define platform_getchar _getch // Windows specific getchar
+
+#else // For Linux/macOS (non-Windows)
+    #include <sys/stat.h> // For mkdir, stat
+    #include <unistd.h>   // For access, read, write, geteuid, readlink, fork, pipe
+    #include <termios.h>  // For termios functions
+    #include <sys/wait.h> // For waitpid
+    #include <sys/socket.h> // For socket functions
+    #include <netinet/in.h> // For sockaddr_in
+
+    #define PATH_SEP "/"
+    #define HOME_ENV "HOME"
+
+    // Dummy Winsock functions for non-Windows
+    static int init_winsock(void) { return 0; }
+    static void cleanup_winsock(void) {}
+
+    // Raw mode functions for Unix-like systems
+    static struct termios original_termios;
+    static int raw_mode_enabled = 0;
+
     static void enable_raw_mode(void) {
-        tcgetattr(STDIN_FILENO, &orig_termios);
-        struct termios raw = orig_termios;
-        raw.c_lflag &= ~(ECHO | ICANON);
-        tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+        if (!raw_mode_enabled) {
+            tcgetattr(STDIN_FILENO, &original_termios);
+            struct termios raw = original_termios;
+            raw.c_lflag &= ~(ECHO | ICANON); // Disable echo and canonical mode
+            raw.c_cc[VMIN] = 1; // Read 1 byte at a time
+            raw.c_cc[VTIME] = 0; // No timeout
+            tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+            raw_mode_enabled = 1;
+        }
     }
-    
+
     static void disable_raw_mode(void) {
-        tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
+        if (raw_mode_enabled) {
+            tcsetattr(STDIN_FILENO, TCSAFLUSH, &original_termios);
+            raw_mode_enabled = 0;
+        }
     }
-    
+
+    // Unix-like specific getchar
     static int platform_getchar(void) {
-        return getchar();
+        int ch;
+        // Raw mode is handled by enable_raw_mode/disable_raw_mode calls in auth.c
+        ch = getchar();
+        return ch;
     }
-#endif
+#endif // End of platform-specific block
 
 // Constants
 #define MAX_URL_SIZE 2048
@@ -133,7 +144,7 @@
 #define OAUTH_TOKEN_URL "https://oauth2.googleapis.com/token"
 #define DRIVE_API_URL "https://www.googleapis.com/drive/v3/files"
 #define UPLOAD_API_URL "https://www.googleapis.com/upload/drive/v3/files"
-#define REDIRECT_URI "http://localhost:8080/callback"
+#define REDIRECT_URI "http://localhost:8080"
 #define SCOPE "https://www.googleapis.com/auth/drive.file"
 
 // Menu options
@@ -174,7 +185,7 @@ extern OAuthTokens g_tokens;
 extern char g_last_upload_link[MAX_URL_SIZE];
 
 // Function declarations
-int cdrive_auth_login(void);
+int cdrive_auth_login(int headless);
 int cdrive_upload(const char *source_path, const char *target_folder);
 int cdrive_list_files(const char *folder_id);
 int cdrive_create_folder(const char *folder_name, const char *parent_id);
@@ -220,11 +231,7 @@ void print_success(const char *message);
 void print_error(const char *message);
 void print_info(const char *message);
 void print_warning(const char *message);
-int get_single_char(void);
-void enable_raw_mode(void);
-void disable_raw_mode(void);
-void clear_line(void);
-void move_cursor_up(int lines);
+
 
 // Loading spinner functions
 typedef struct {

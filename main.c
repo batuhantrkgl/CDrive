@@ -36,7 +36,13 @@ int main(int argc, char *argv[]) {
 
         if (strcmp(argv[2], "login") == 0) {
             print_header("Google Drive Authentication");
-            if (cdrive_auth_login() == 0) {
+
+            int headless = 0;
+            if (argc > 3 && strcmp(argv[3], "--no-browser") == 0) {
+                headless = 1;
+            }
+
+            if (cdrive_auth_login(headless) == 0) {
                 printf("\n");
                 print_success("Authentication complete.");
                 print_success("Configured Google Drive access");
