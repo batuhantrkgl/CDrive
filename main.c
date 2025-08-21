@@ -119,6 +119,11 @@ int main(int argc, char *argv[]) {
             return 1;
         }
     } else if (strcmp(argv[1], "pull") == 0) {
+        if (load_tokens(&g_tokens) != 0) {
+            print_error("Not authenticated. Run 'cdrive auth login' first.");
+            curl_global_cleanup();
+            return 1;
+        }
         if (argc > 2) {
             // Direct download by ID
             const char *file_id = argv[2];

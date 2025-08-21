@@ -57,9 +57,9 @@
         if (!raw_mode_enabled) {
             tcgetattr(STDIN_FILENO, &original_termios);
             struct termios raw = original_termios;
-            raw.c_lflag &= ~(ECHO | ICANON); // Disable echo and canonical mode
-            raw.c_cc[VMIN] = 1; // Read 1 byte at a time
-            raw.c_cc[VTIME] = 0; // No timeout
+            raw.c_lflag &= ~(ECHO | ICANON);
+            raw.c_cc[VMIN] = 0;
+            raw.c_cc[VTIME] = 1; // 0.1 second timeout
             tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
             raw_mode_enabled = 1;
         }
@@ -71,91 +71,120 @@
             raw_mode_enabled = 0;
         }
     }
-
-    // Unix-like specific getchar
-    static int platform_getchar(void) {
-        int ch;
-        // Raw mode is handled by enable_raw_mode/disable_raw_mode calls in auth.c
-        ch = getchar();
-        return ch;
-    }
 #endif // End of platform-specific block
 
 int show_interactive_menu(const char *question, const char **options, int num_options) {
     int selected = 0;
-    char input;
-    
+    int start_index = 0;
+    int display_window_size = 10;
+
+    if (num_options < display_window_size) {
+        display_window_size = num_options;
+    }
+
     while (1) {
-        // Clear screen and position cursor at top
         printf("\033[2J\033[1;1H");
-        
-        // Display question with colored prompt
         print_colored("[?] ", COLOR_CYAN);
         print_colored(question, COLOR_BOLD);
         printf("\n\n");
-        printf("  (Use %s↑/↓%s arrows to move, %sEnter%s to select, %s'q'%s to quit)\n\n", 
+        printf("  (Use %s↑/↓%s arrows to move, %sEnter%s to select, %s'q'%s to quit)\n\n",
                COLOR_YELLOW, COLOR_RESET, COLOR_GREEN, COLOR_RESET, COLOR_RED, COLOR_RESET);
-        
-        // Display options
-        for (int i = 0; i < num_options; i++) {
+
+        for (int i = start_index; i < start_index + display_window_size && i < num_options; i++) {
             if (i == selected) {
                 print_colored("  > ", COLOR_GREEN);
                 print_colored(options[i], COLOR_BOLD);
                 printf("\n");
             } else {
-                printf("  %s\n", options[i]);
+                printf("    %s\n", options[i]);
             }
         }
-        
+
         printf("\n");
+
+        if (start_index > 0) {
+            printf("  %s... (more above)%s\n", COLOR_YELLOW, COLOR_RESET);
+        }
+        if (start_index + display_window_size < num_options) {
+            printf("  %s... (more below)%s\n", COLOR_YELLOW, COLOR_RESET);
+        }
+
         fflush(stdout);
-        
-        // Get input
+
         enable_raw_mode();
-        input = platform_getchar();
-        
-        switch (input) {
-            case '\033': // Arrow keys sequence
-                if (platform_getchar() == '[') {
-                    char arrow = platform_getchar();
-                    switch (arrow) {
-                        case 'A': // Up arrow
-                            selected = (selected - 1 + num_options) % num_options;
-                            break;
-                        case 'B': // Down arrow
-                            selected = (selected + 1) % num_options;
-                            break;
+        char c;
+        if (read(STDIN_FILENO, &c, 1) != 1) {
+            disable_raw_mode();
+            continue;
+        }
+        fprintf(stderr, "read: %d\n", c);
+
+        if (c == '\033') {
+            fprintf(stderr, "got escape\n");
+            char seq[2];
+            if (read(STDIN_FILENO, &seq[0], 1) != 1) {
+                fprintf(stderr, "timeout on seq[0]\n");
+                disable_raw_mode();
+                continue;
+            }
+            fprintf(stderr, "seq[0]: %d\n", seq[0]);
+            if (read(STDIN_FILENO, &seq[1], 1) != 1) {
+                fprintf(stderr, "timeout on seq[1]\n");
+                disable_raw_mode();
+                continue;
+            }
+            fprintf(stderr, "seq[1]: %d\n", seq[1]);
+
+            if (seq[0] == '[') {
+                if (seq[1] == 'A') {
+                    selected = (selected > 0) ? selected - 1 : num_options - 1;
+                    if (selected < start_index) {
+                        start_index = selected;
+                    }
+                } else if (seq[1] == 'B') {
+                    selected = (selected < num_options - 1) ? selected + 1 : 0;
+                    if (selected >= start_index + display_window_size) {
+                        start_index = selected - display_window_size + 1;
                     }
                 }
-                break;
-            case '\n': // Enter
-            case '\r':
-                disable_raw_mode();
-                // Clear screen and show final selection
-                printf("\033[2J\033[1;1H");
-                print_colored("[>] ", COLOR_GREEN);
-                print_colored("Selected: ", COLOR_BOLD);
-                printf("%s\n\n", options[selected]);
-                return selected;
-            case 'q':
-            case 'Q':
-                disable_raw_mode();
-                printf("\033[2J\033[1;1H");
-                print_colored("[!] ", COLOR_YELLOW);
-                printf("Authentication cancelled.\n");
-                return -1;
-            case 'k': // vim-style up
-            case 'K':
-                selected = (selected - 1 + num_options) % num_options;
-                break;
-            case 'j': // vim-style down
-            case 'J':
-                selected = (selected + 1) % num_options;
-                break;
+            }
+        } else {
+            switch (c) {
+                case 'k':
+                case 'K':
+                    selected = (selected > 0) ? selected - 1 : num_options - 1;
+                    if (selected < start_index) {
+                        start_index = selected;
+                    }
+                    break;
+                case 'j':
+                case 'J':
+                    selected = (selected < num_options - 1) ? selected + 1 : 0;
+                    if (selected >= start_index + display_window_size) {
+                        start_index = selected - display_window_size + 1;
+                    }
+                    break;
+                case '\n':
+                case '\r':
+                    disable_raw_mode();
+                    printf("\033[2J\033[1;1H");
+                    print_colored("[>] ", COLOR_GREEN);
+                    print_colored("Selected: ", COLOR_BOLD);
+                    printf("%s\n\n", options[selected]);
+                    return selected;
+                case 'q':
+                case 'Q':
+                    disable_raw_mode();
+                    printf("\033[2J\033[1;1H");
+                    print_colored("[!] ", COLOR_YELLOW);
+                    printf("Selection cancelled.\n");
+                    return -1;
+            }
         }
         disable_raw_mode();
     }
 }
+
 
 // Color printing functions
 void print_colored(const char *text, const char *color) {
@@ -371,7 +400,7 @@ int start_local_server(char *auth_code, const char *auth_url, int open_browser) 
     int addrlen = sizeof(address);
     char buffer[4096] = {0};
     
-    const char *response_html = 
+    const char *response_html =
         "HTTP/1.1 200 OK\r\n"
         "Content-Type: text/html\r\n"
         "Connection: close\r\n\r\n"

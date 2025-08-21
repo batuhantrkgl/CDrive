@@ -77,7 +77,7 @@
 #define DRIVE_API_URL "https://www.googleapis.com/drive/v3/files"
 #define UPLOAD_API_URL "https://www.googleapis.com/upload/drive/v3/files"
 #define REDIRECT_URI "http://localhost:8080"
-#define SCOPE "https://www.googleapis.com/auth/drive.file"
+#define SCOPE "https://www.googleapis.com/auth/drive"
 
 // Menu options
 typedef enum {
