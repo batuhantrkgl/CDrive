@@ -20,7 +20,7 @@ SOURCES = main.c auth.c upload.c spinner.c version.c download.c
 OUT_DIR = out
 DIST_DIR = $(OUT_DIR)/dist
 OBJ_DIR = $(OUT_DIR)/obj
-DEP_DIR = $(OBJ_DIR)/deps # For dependency files
+DEP_DIR = $(OBJ_DIR)/deps
 
 # Host system detection
 ifeq ($(OS),Windows_NT)
@@ -41,7 +41,6 @@ HOST_TARGET = $(HOST_OS_NAME)-$(HOST_ARCH)
 # Compiler and flags
 CC ?= gcc
 BASE_CFLAGS = -Wall -Wextra -std=c99 -O2
-DEP_FLAGS = -MMD -MP -MF $(DEP_DIR)/$(*F).d
 CFLAGS ?= $(BASE_CFLAGS)
 DEBUG_CFLAGS = -Wall -Wextra -std=c99 -g -DDEBUG
 
@@ -52,14 +51,14 @@ HOST_LIBS = $(shell pkg-config --libs $(PKG_LIBS)) -lm -lpthread
 
 # Target platforms for cross-compilation
 TARGETS = \
-	linux-x86_64 \
-	linux-i386 \
-	linux-arm64 \
-	linux-armv7 \
-	windows-x86_64 \
-	windows-i386 \
-	darwin-x86_64 \
-	darwin-arm64
+    linux-x86_64 \
+    linux-i386 \
+    linux-arm64 \
+    linux-armv7 \
+    windows-x86_64 \
+    windows-i386 \
+    darwin-x86_64 \
+    darwin-arm64
 
 # Cross-compiler configurations
 CC_linux-x86_64 = gcc
@@ -89,20 +88,18 @@ OBJECTS = $(SOURCES:%.c=$(OBJ_DIR)/%.o)
 # Default target - build for host system
 all: $(DIST_DIR)/$(PROJECT_NAME)
 
-# Create directories
-$(DIST_DIR) $(OBJ_DIR) $(DEP_DIR):
-	@mkdir -p $@
-
 # Build for host system
-$(DIST_DIR)/$(PROJECT_NAME): $(OBJECTS) | $(DIST_DIR) $(OBJ_DIR)
+$(DIST_DIR)/$(PROJECT_NAME): $(OBJECTS)
+	@mkdir -p $(DIST_DIR)
 	@printf "$(CYAN)Linking $(BOLD)$(PROJECT_NAME)$(RESET)$(CYAN) for $(YELLOW)$(HOST_TARGET)$(RESET)$(CYAN)...$(RESET)\n"
 	$(CC) $(OBJECTS) -o $@ $(HOST_LIBS)
 	@printf "$(GREEN)Build complete: $(BOLD)$@$(RESET)\n"
 
 # Compile source files
-$(OBJ_DIR)/%.o: %.c | $(OBJ_DIR) $(DEP_DIR)
+$(OBJ_DIR)/%.o: %.c
+	@mkdir -p $(OBJ_DIR) $(DEP_DIR)
 	@printf "$(BLUE)Compiling $(BOLD)$<$(RESET)$(BLUE)...$(RESET)\n"
-	$(CC) $(CFLAGS) $(HOST_CFLAGS) $(DEP_FLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) $(HOST_CFLAGS) -MMD -MP -MF $(DEP_DIR)/$*.d -c $< -o $@
 
 # Include generated dependency files
 -include $(SOURCES:%.c=$(DEP_DIR)/%.d)
