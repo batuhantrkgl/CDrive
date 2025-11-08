@@ -146,19 +146,56 @@ int cdrive_upload(const char *source_path, const char *target_folder) {
 
     start_spinner(&setup_spinner, "Preparing upload...");
 
-    for (int attempt = 0; attempt < 2; attempt++) {
-        if (attempt == 0) {
-            // First attempt, load tokens from file
-            if (load_tokens(&g_tokens) != 0) {
-                stop_spinner(&setup_spinner);
-                print_error("Not authenticated. Run 'cdrive auth login' first.");
+    // Load tokens from file
+    if (load_tokens(&g_tokens) != 0) {
+        stop_spinner(&setup_spinner);
+        print_error("Not authenticated. Run 'cdrive auth login' first.");
+        free(mime_type);
+        return -1;
+    }
+
+    // Validate token before upload by making a quick API call
+    CURL *test_curl = curl_easy_init();
+    if (test_curl) {
+        APIResponse test_response = {0};
+        char auth_header[MAX_HEADER_SIZE];
+        snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", g_tokens.access_token);
+        struct curl_slist *test_headers = NULL;
+        test_headers = curl_slist_append(test_headers, auth_header);
+        
+        curl_easy_setopt(test_curl, CURLOPT_URL, "https://www.googleapis.com/drive/v3/about?fields=user");
+        curl_easy_setopt(test_curl, CURLOPT_HTTPHEADER, test_headers);
+        curl_easy_setopt(test_curl, CURLOPT_WRITEFUNCTION, write_response_callback);
+        curl_easy_setopt(test_curl, CURLOPT_WRITEDATA, &test_response);
+        
+        CURLcode test_res = curl_easy_perform(test_curl);
+        long test_http_code = 0;
+        curl_easy_getinfo(test_curl, CURLINFO_RESPONSE_CODE, &test_http_code);
+        
+        curl_slist_free_all(test_headers);
+        curl_easy_cleanup(test_curl);
+        if (test_response.data) free(test_response.data);
+        
+        // If token is expired, refresh it before upload
+        if (test_res == CURLE_OK && (test_http_code == 401 || test_http_code == 403)) {
+            stop_spinner(&setup_spinner);
+            printf("\n");
+            print_info("Access token expired. Refreshing...");
+            if (refresh_access_token(&g_tokens) != 0 || save_tokens(&g_tokens) != 0) {
+                print_error("Failed to refresh token. Please re-authenticate with 'cdrive auth login'.");
                 free(mime_type);
                 return -1;
             }
-        } else {
+            print_success("Token refreshed successfully");
+            start_spinner(&setup_spinner, "Preparing upload...");
+        }
+    }
+
+    for (int attempt = 0; attempt < 2; attempt++) {
+        if (attempt == 1) {
             // Second attempt, try to refresh the token
             printf("\n");
-            print_info("Access token may be expired. Attempting to refresh...");
+            print_info("Upload failed due to authentication. Attempting to refresh token...");
             if (refresh_access_token(&g_tokens) != 0 || save_tokens(&g_tokens) != 0) {
                 print_error("Failed to refresh token. Please re-authenticate with 'cdrive auth login'.");
                 break; // Exit loop, will fail with the previous error code
