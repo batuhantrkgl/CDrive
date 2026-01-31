@@ -118,19 +118,15 @@ elif [[ "$TARGET" == "windows-"* ]]; then
     fi
 
     echo "--- :rocket: Cross-compiling for Windows $ARCH"
-    # Override CFLAGS and LIBS to point to our manually built deps
+    # Override CFLAGS to point to our manually built deps
     export CFLAGS="-I$DEPS_DIR/include"
-    export LIBS="-L$DEPS_DIR/lib -lcurl -ljson-c -lws2_32 -lm"
 
-    # We must explicitly set CC to the cross-compiler because 'make' might default to 'gcc' for the linker step
-    # if not all variables are perfectly propagated or if 'make' invokes the linker directly.
-    # The Makefile uses 'CC_windows-x86_64 = x86_64-w64-mingw32-gcc', but we are passing LIBS manually,
-    # so we should ensure the environment is consistent.
-    # Actually, the Makefile uses $(CC) which defaults to gcc if not overridden by target-specific variable.
-    # The target-specific variable in Makefile (CC_windows-x86_64) is used in the rule.
-    # However, to be safe and ensure our CFLAGS/LIBS are picked up correctly with the right compiler:
+    # The Makefile uses LIBS_windows for the windows targets. We need to override that.
+    # We also need to add -lbcrypt and others that static curl might need.
+    export LIBS_windows="-L$DEPS_DIR/lib -lcurl -ljson-c -lws2_32 -lm -lbcrypt -ladvapi32 -lcrypt32"
 
-    make cross-windows-$ARCH CFLAGS="$CFLAGS" LIBS="$LIBS"
+    # We pass LIBS_windows to make to override the default.
+    make cross-windows-$ARCH CFLAGS="$CFLAGS" LIBS_windows="$LIBS_windows"
 
 else
     echo "Unknown target: $TARGET"
