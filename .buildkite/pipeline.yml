@@ -1,9 +1,27 @@
 steps:
-  - label: ":hammer: Build and Test"
+  - label: ":linux: Build Native (x86_64)"
     plugins:
       - docker#v5.8.0:
           image: "ubuntu:latest"
           shell: ["/bin/bash", "-e", "-c"]
     env:
       DEBIAN_FRONTEND: "noninteractive"
-    command: ".buildkite/build.sh"
+    command: ".buildkite/build.sh native"
+
+  - label: ":linux: Build i386"
+    plugins:
+      - docker#v5.8.0:
+          image: "ubuntu:latest"
+          shell: ["/bin/bash", "-e", "-c"]
+    env:
+      DEBIAN_FRONTEND: "noninteractive"
+    command: ".buildkite/build.sh linux-i386"
+
+  - label: ":linux: Build ARM64"
+    plugins:
+      - docker#v5.8.0:
+          image: "ubuntu:latest"
+          shell: ["/bin/bash", "-e", "-c"]
+    env:
+      DEBIAN_FRONTEND: "noninteractive"
+    command: ".buildkite/build.sh linux-arm64"
