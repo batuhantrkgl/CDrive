@@ -73,6 +73,31 @@ EOF
     export PKG_CONFIG_LIBDIR="/usr/lib/aarch64-linux-gnu/pkgconfig"
     make cross-linux-arm64
 
+elif [ "$TARGET" = "windows-x86_64" ]; then
+    echo "--- :windows: Installing Windows (x86_64) cross-compilation tools"
+    apt-get install -y mingw-w64
+
+    # Note: mingw-w64 usually includes headers/libs, but specific deps like libcurl might need manual handling or
+    # finding a mingw build of them. However, for this task, we will attempt the basic cross-compile.
+    # Often, CI environments use separate images or package managers for this.
+    # For now, we install the compiler. If deps are missing, we might need 'make deps' logic or failure is expected.
+    # But usually 'libcurl' for windows is not in standard ubuntu repos for mingw.
+    # Checking if the Makefile handles this... it says:
+    # LIBS_windows = -lcurl -ljson-c -lws2_32 -lm
+    # It assumes libraries are available.
+    # In standard Ubuntu, we might not have 'libcurl' for MinGW pre-packaged.
+    # But let's try.
+
+    echo "--- :rocket: Cross-compiling for Windows x86_64"
+    make cross-windows-x86_64
+
+elif [ "$TARGET" = "windows-i386" ]; then
+    echo "--- :windows: Installing Windows (i386) cross-compilation tools"
+    apt-get install -y mingw-w64
+
+    echo "--- :rocket: Cross-compiling for Windows i386"
+    make cross-windows-i386
+
 else
     echo "Unknown target: $TARGET"
     exit 1

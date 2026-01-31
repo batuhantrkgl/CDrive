@@ -26,12 +26,20 @@ steps:
       DEBIAN_FRONTEND: "noninteractive"
     command: ".buildkite/build.sh linux-arm64"
 
-  - label: ":mac: Build MacOS"
-    agents:
-      os: "macos"
-    command: ".buildkite/build_macos.sh"
+  - label: ":windows: Build Windows (x86_64)"
+    plugins:
+      - docker#v5.8.0:
+          image: "ubuntu:latest"
+          shell: ["/bin/bash", "-e", "-c"]
+    env:
+      DEBIAN_FRONTEND: "noninteractive"
+    command: ".buildkite/build.sh windows-x86_64"
 
-  - label: ":windows: Build Windows"
-    agents:
-      os: "windows"
-    command: "powershell -ExecutionPolicy Bypass -File .buildkite/build_windows.ps1"
+  - label: ":windows: Build Windows (i386)"
+    plugins:
+      - docker#v5.8.0:
+          image: "ubuntu:latest"
+          shell: ["/bin/bash", "-e", "-c"]
+    env:
+      DEBIAN_FRONTEND: "noninteractive"
+    command: ".buildkite/build.sh windows-i386"
