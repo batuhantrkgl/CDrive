@@ -11,7 +11,13 @@ apt-get install -y \
     pkg-config \
     curl \
     git \
-    lsb-release
+    lsb-release \
+    wget \
+    unzip \
+    cmake \
+    autoconf \
+    libtool \
+    automake
 
 # Detect OS codename
 CODENAME=$(lsb_release -sc)
@@ -46,11 +52,7 @@ elif [ "$TARGET" = "linux-i386" ]; then
 elif [ "$TARGET" = "linux-arm64" ]; then
     echo "--- :linux: Installing arm64 cross-compilation tools"
 
-    # Enable arm64 architecture
     dpkg --add-architecture arm64
-
-    # Setup repositories for multi-arch (amd64 on archive, arm64 on ports)
-    # Remove existing sources to avoid conflicts/404s
     rm -f /etc/apt/sources.list.d/*.sources
 
     echo "Writing new sources.list..."
@@ -64,39 +66,71 @@ deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ $CODENAME-security main r
 EOF
 
     apt-get update
-
-    # Install cross-compiler and libraries
-    apt-get install -y gcc-aarch64-linux-gnu
-    apt-get install -y libcurl4-openssl-dev:arm64 libjson-c-dev:arm64
+    apt-get install -y gcc-aarch64-linux-gnu libcurl4-openssl-dev:arm64 libjson-c-dev:arm64
 
     echo "--- :rocket: Cross-compiling for arm64"
     export PKG_CONFIG_LIBDIR="/usr/lib/aarch64-linux-gnu/pkgconfig"
     make cross-linux-arm64
 
-elif [ "$TARGET" = "windows-x86_64" ]; then
-    echo "--- :windows: Installing Windows (x86_64) cross-compilation tools"
+elif [[ "$TARGET" == "windows-"* ]]; then
+    ARCH="x86_64"
+    HOST="x86_64-w64-mingw32"
+    if [ "$TARGET" == "windows-i386" ]; then
+        ARCH="i686"
+        HOST="i686-w64-mingw32"
+    fi
+
+    echo "--- :windows: Installing Windows ($ARCH) toolchain"
     apt-get install -y mingw-w64
 
-    # Note: mingw-w64 usually includes headers/libs, but specific deps like libcurl might need manual handling or
-    # finding a mingw build of them. However, for this task, we will attempt the basic cross-compile.
-    # Often, CI environments use separate images or package managers for this.
-    # For now, we install the compiler. If deps are missing, we might need 'make deps' logic or failure is expected.
-    # But usually 'libcurl' for windows is not in standard ubuntu repos for mingw.
-    # Checking if the Makefile handles this... it says:
-    # LIBS_windows = -lcurl -ljson-c -lws2_32 -lm
-    # It assumes libraries are available.
-    # In standard Ubuntu, we might not have 'libcurl' for MinGW pre-packaged.
-    # But let's try.
+    # Create deps directory
+    DEPS_DIR="/workdir/deps/$ARCH"
+    mkdir -p "$DEPS_DIR"
+    export PATH="$DEPS_DIR/bin:$PATH"
 
-    echo "--- :rocket: Cross-compiling for Windows x86_64"
-    make cross-windows-x86_64
+    echo "--- :package: Building json-c for Windows ($ARCH)"
+    if [ ! -f "$DEPS_DIR/lib/libjson-c.a" ]; then
+        git clone https://github.com/json-c/json-c.git
+        cd json-c
+        mkdir build
+        cd build
+        cmake .. \
+            -DCMAKE_SYSTEM_NAME=Windows \
+            -DCMAKE_C_COMPILER=$HOST-gcc \
+            -DCMAKE_INSTALL_PREFIX="$DEPS_DIR" \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DDISABLE_WERROR=ON
+        make install
+        cd ../..
+        rm -rf json-c
+    fi
 
-elif [ "$TARGET" = "windows-i386" ]; then
-    echo "--- :windows: Installing Windows (i386) cross-compilation tools"
-    apt-get install -y mingw-w64
+    echo "--- :package: Building curl for Windows ($ARCH)"
+    if [ ! -f "$DEPS_DIR/lib/libcurl.a" ]; then
+        wget https://curl.se/download/curl-8.5.0.tar.gz
+        tar xzf curl-8.5.0.tar.gz
+        cd curl-8.5.0
+        ./configure --host=$HOST --prefix="$DEPS_DIR" --disable-shared --enable-static --without-ssl --disable-ldap --disable-ldaps
+        make
+        make install
+        cd ..
+        rm -rf curl-8.5.0*
+    fi
 
-    echo "--- :rocket: Cross-compiling for Windows i386"
-    make cross-windows-i386
+    echo "--- :rocket: Cross-compiling for Windows $ARCH"
+    # Override CFLAGS and LIBS to point to our manually built deps
+    export CFLAGS="-I$DEPS_DIR/include"
+    export LIBS="-L$DEPS_DIR/lib -lcurl -ljson-c -lws2_32 -lm"
+
+    # We must explicitly set CC to the cross-compiler because 'make' might default to 'gcc' for the linker step
+    # if not all variables are perfectly propagated or if 'make' invokes the linker directly.
+    # The Makefile uses 'CC_windows-x86_64 = x86_64-w64-mingw32-gcc', but we are passing LIBS manually,
+    # so we should ensure the environment is consistent.
+    # Actually, the Makefile uses $(CC) which defaults to gcc if not overridden by target-specific variable.
+    # The target-specific variable in Makefile (CC_windows-x86_64) is used in the rule.
+    # However, to be safe and ensure our CFLAGS/LIBS are picked up correctly with the right compiler:
+
+    make cross-windows-$ARCH CFLAGS="$CFLAGS" LIBS="$LIBS"
 
 else
     echo "Unknown target: $TARGET"
