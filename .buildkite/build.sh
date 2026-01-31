@@ -93,6 +93,7 @@ elif [[ "$TARGET" == "windows-"* ]]; then
 
     echo "--- :package: Building json-c for Windows ($ARCH)"
     if [ ! -f "$DEPS_DIR/lib/libjson-c.a" ]; then
+        rm -rf json-c
         git clone https://github.com/json-c/json-c.git
         cd json-c
         mkdir build
@@ -110,6 +111,7 @@ elif [[ "$TARGET" == "windows-"* ]]; then
 
     echo "--- :package: Building curl for Windows ($ARCH)"
     if [ ! -f "$DEPS_DIR/lib/libcurl.a" ]; then
+        rm -rf curl-8.5.0*
         wget https://curl.se/download/curl-8.5.0.tar.gz
         tar xzf curl-8.5.0.tar.gz
         cd curl-8.5.0
@@ -181,6 +183,7 @@ elif [[ "$TARGET" == "macos-"* ]]; then
 
     echo "--- :package: Building json-c for MacOS ($ARCH)"
     if [ ! -f "$DEPS_DIR/lib/libjson-c.a" ]; then
+        rm -rf json-c
         git clone https://github.com/json-c/json-c.git
         cd json-c
         mkdir build
@@ -200,6 +203,7 @@ elif [[ "$TARGET" == "macos-"* ]]; then
 
     echo "--- :package: Building curl for MacOS ($ARCH)"
     if [ ! -f "$DEPS_DIR/lib/libcurl.a" ]; then
+        rm -rf curl-8.5.0*
         wget https://curl.se/download/curl-8.5.0.tar.gz
         tar xzf curl-8.5.0.tar.gz
         cd curl-8.5.0
