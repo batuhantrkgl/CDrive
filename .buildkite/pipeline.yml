@@ -43,3 +43,21 @@ steps:
     env:
       DEBIAN_FRONTEND: "noninteractive"
     command: ".buildkite/build.sh windows-i386"
+
+  - label: ":mac: Build MacOS (x86_64)"
+    plugins:
+      - docker#v5.8.0:
+          image: "ubuntu:latest"
+          shell: ["/bin/bash", "-e", "-c"]
+    env:
+      DEBIAN_FRONTEND: "noninteractive"
+    command: ".buildkite/build.sh macos-x86_64"
+
+  - label: ":mac: Build MacOS (ARM64)"
+    plugins:
+      - docker#v5.8.0:
+          image: "ubuntu:latest"
+          shell: ["/bin/bash", "-e", "-c"]
+    env:
+      DEBIAN_FRONTEND: "noninteractive"
+    command: ".buildkite/build.sh macos-arm64"

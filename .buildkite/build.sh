@@ -14,6 +14,9 @@ apt-get install -y \
     lsb-release \
     wget \
     unzip \
+    tar \
+    gzip \
+    xz-utils \
     cmake \
     autoconf \
     libtool \
@@ -84,7 +87,7 @@ elif [[ "$TARGET" == "windows-"* ]]; then
     apt-get install -y mingw-w64
 
     # Create deps directory
-    DEPS_DIR="/workdir/deps/$ARCH"
+    DEPS_DIR="/workdir/deps/windows-$ARCH"
     mkdir -p "$DEPS_DIR"
     export PATH="$DEPS_DIR/bin:$PATH"
 
@@ -110,7 +113,8 @@ elif [[ "$TARGET" == "windows-"* ]]; then
         wget https://curl.se/download/curl-8.5.0.tar.gz
         tar xzf curl-8.5.0.tar.gz
         cd curl-8.5.0
-        ./configure --host=$HOST --prefix="$DEPS_DIR" --disable-shared --enable-static --without-ssl --disable-ldap --disable-ldaps
+        # Enable Schannel (native Windows SSL) and disable other features to simplify
+        ./configure --host=$HOST --prefix="$DEPS_DIR" --disable-shared --enable-static --with-schannel --disable-ldap --disable-ldaps
         make
         make install
         cd ..
@@ -121,12 +125,103 @@ elif [[ "$TARGET" == "windows-"* ]]; then
     # Override CFLAGS to point to our manually built deps
     export CFLAGS="-I$DEPS_DIR/include"
 
-    # The Makefile uses LIBS_windows for the windows targets. We need to override that.
-    # We also need to add -lbcrypt and others that static curl might need.
-    export LIBS_windows="-L$DEPS_DIR/lib -lcurl -ljson-c -lws2_32 -lm -lbcrypt -ladvapi32 -lcrypt32"
+    # Define libraries. Note: -lcurl needs -lbcrypt -lcrypt32 for Schannel?
+    # Usually curl-config --static-libs would tell us, but we can't run it easily (it's a script).
+    # We'll guess common Windows libs.
+    export LIBS_windows="-L$DEPS_DIR/lib -lcurl -ljson-c -lws2_32 -lm -lbcrypt -ladvapi32 -lcrypt32 -lkernel32 -luser32"
 
     # We pass LIBS_windows to make to override the default.
-    make cross-windows-$ARCH CFLAGS="$CFLAGS" LIBS_windows="$LIBS_windows"
+    # We also explicitly pass the compiler to ensure make uses the right one.
+    MAKE_CC="CC_windows-$ARCH=$HOST-gcc"
+    if [ "$ARCH" == "i686" ]; then
+         MAKE_CC="CC_windows-i386=$HOST-gcc"
+    fi
+
+    make cross-windows-$ARCH CFLAGS="$CFLAGS" LIBS_windows="$LIBS_windows" $MAKE_CC
+
+elif [[ "$TARGET" == "macos-"* ]]; then
+    ARCH="x86_64"
+    if [ "$TARGET" == "macos-arm64" ]; then
+        ARCH="arm64"
+    fi
+
+    echo "--- :mac: Installing Zig for MacOS cross-compilation"
+    ZIG_VER="0.13.0"
+    if [ ! -d "zig-linux-x86_64-$ZIG_VER" ]; then
+        wget -q "https://ziglang.org/download/$ZIG_VER/zig-linux-x86_64-$ZIG_VER.tar.xz"
+        tar -xf "zig-linux-x86_64-$ZIG_VER.tar.xz"
+    fi
+    export PATH="$PWD/zig-linux-x86_64-$ZIG_VER:$PATH"
+
+    ZIG_TARGET="x86_64-macos"
+    if [ "$ARCH" == "arm64" ]; then
+        ZIG_TARGET="aarch64-macos"
+    fi
+
+    DEPS_DIR="/workdir/deps/macos-$ARCH"
+    mkdir -p "$DEPS_DIR"
+
+    # Create a wrapper script for CC to make it behave like a standard compiler
+    echo '#!/bin/bash' > macos-cc
+    echo "exec zig cc -target $ZIG_TARGET \"\$@\"" >> macos-cc
+    chmod +x macos-cc
+    export CC="$PWD/macos-cc"
+    export CXX="$PWD/macos-cc" # Zig cc handles c++ too usually, but let's stick to C
+
+    # Create wrappers for AR and RANLIB
+    echo '#!/bin/bash' > macos-ar
+    echo "exec zig ar \"\$@\"" >> macos-ar
+    chmod +x macos-ar
+    export AR="$PWD/macos-ar"
+
+    echo '#!/bin/bash' > macos-ranlib
+    echo "exec zig ranlib \"\$@\"" >> macos-ranlib
+    chmod +x macos-ranlib
+    export RANLIB="$PWD/macos-ranlib"
+
+    echo "--- :package: Building json-c for MacOS ($ARCH)"
+    if [ ! -f "$DEPS_DIR/lib/libjson-c.a" ]; then
+        git clone https://github.com/json-c/json-c.git
+        cd json-c
+        mkdir build
+        cd build
+        cmake .. \
+            -DCMAKE_SYSTEM_NAME=Darwin \
+            -DCMAKE_C_COMPILER="$CC" \
+            -DCMAKE_AR="$AR" \
+            -DCMAKE_RANLIB="$RANLIB" \
+            -DCMAKE_INSTALL_PREFIX="$DEPS_DIR" \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DDISABLE_WERROR=ON
+        make install
+        cd ../..
+        rm -rf json-c
+    fi
+
+    echo "--- :package: Building curl for MacOS ($ARCH)"
+    if [ ! -f "$DEPS_DIR/lib/libcurl.a" ]; then
+        wget https://curl.se/download/curl-8.5.0.tar.gz
+        tar xzf curl-8.5.0.tar.gz
+        cd curl-8.5.0
+        # Use SecureTransport (deprecated but simple) or verify if Zig supports it.
+        # Zig cross-compilation to MacOS links against SDK frameworks.
+        # Curl's --with-secure-transport works with macOS SDK.
+        ./configure --host=$ZIG_TARGET --prefix="$DEPS_DIR" --disable-shared --enable-static --with-secure-transport --disable-ldap --disable-ldaps
+        make
+        make install
+        cd ..
+        rm -rf curl-8.5.0*
+    fi
+
+    echo "--- :rocket: Cross-compiling for MacOS $ARCH"
+    export CFLAGS="-I$DEPS_DIR/include"
+    # Need to link CoreFoundation and Security frameworks for curl/SSL
+    export LIBS_darwin="-L$DEPS_DIR/lib -lcurl -ljson-c -lm -lpthread -framework CoreFoundation -framework Security"
+
+    # Makefile expects CC_darwin-x86_64 or CC_darwin-arm64
+    MAKE_CC="CC_darwin-$ARCH=$CC"
+
+    make cross-darwin-$ARCH CFLAGS="$CFLAGS" LIBS_darwin="$LIBS_darwin" $MAKE_CC
 
 else
     echo "Unknown target: $TARGET"
