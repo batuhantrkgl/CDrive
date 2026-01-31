@@ -88,9 +88,12 @@ OBJECTS = $(SOURCES:%.c=$(OBJ_DIR)/%.o)
 # Default target - build for host system
 all: $(DIST_DIR)/$(PROJECT_NAME)
 
+# Directory creation rule
+$(DIST_DIR):
+	@mkdir -p $@
+
 # Build for host system
-$(DIST_DIR)/$(PROJECT_NAME): $(OBJECTS)
-	@mkdir -p $(DIST_DIR)
+$(DIST_DIR)/$(PROJECT_NAME): $(OBJECTS) | $(DIST_DIR)
 	@printf "$(CYAN)Linking $(BOLD)$(PROJECT_NAME)$(RESET)$(CYAN) for $(YELLOW)$(HOST_TARGET)$(RESET)$(CYAN)...$(RESET)\n"
 	$(CC) $(OBJECTS) -o $@ $(HOST_LIBS)
 	@printf "$(GREEN)Build complete: $(BOLD)$@$(RESET)\n"
