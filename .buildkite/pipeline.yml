@@ -25,3 +25,13 @@ steps:
     env:
       DEBIAN_FRONTEND: "noninteractive"
     command: ".buildkite/build.sh linux-arm64"
+
+  - label: ":mac: Build MacOS"
+    agents:
+      os: "macos"
+    command: ".buildkite/build_macos.sh"
+
+  - label: ":windows: Build Windows"
+    agents:
+      os: "windows"
+    command: "powershell -ExecutionPolicy Bypass -File .buildkite/build_windows.ps1"
