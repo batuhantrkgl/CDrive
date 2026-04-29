@@ -185,13 +185,11 @@ steps:
           propagate-environment: true
           shell: ["/bin/bash", "-e", "-c"]
           mount-buildkite-agent: true
-          environment:
-            - GH_TOKEN
     command: |
       set -euo pipefail
 
-      echo "GH_TOKEN set: $${GH_TOKEN:+yes}"
-      echo "GH_TOKEN length: $${#GH_TOKEN}"
+      export GH_TOKEN=$(buildkite-agent secret get GH_TOKEN)
+      echo "GH_TOKEN length: ${#GH_TOKEN}"
 
       export DEBIAN_FRONTEND=noninteractive
       apt-get update -q
