@@ -158,8 +158,11 @@ steps:
           mount-buildkite-agent: true
     command: |
       set -euo pipefail
-      mkdir -p combined
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update -q
+      apt-get install -y ca-certificates
 
+      mkdir -p combined
       buildkite-agent artifact download "cdrive-*.tar.gz" combined/
 
       cd combined
@@ -188,7 +191,7 @@ steps:
       set -euo pipefail
       export DEBIAN_FRONTEND=noninteractive
       apt-get update -q
-      apt-get install -y curl git jq
+      apt-get install -y ca-certificates curl git jq
 
       # Install GitHub CLI
       curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
