@@ -2,14 +2,10 @@
 
 steps:
 
-  # ────────────────────────────────────────────
-  # LINUX BUILDS (Docker on ubuntu-latest agent)
-  # ────────────────────────────────────────────
-
   - label: ":linux: Build linux-x86_64"
     key: build-linux-x86_64
     agents:
-      queue: linux
+      queue: default
     plugins:
       - docker#v5.11.0:
           image: ubuntu:latest
@@ -17,7 +13,7 @@ steps:
     command: |
       set -euo pipefail
       export DEBIAN_FRONTEND=noninteractive
-      apt-get update
+      apt-get update -q
       apt-get install -y build-essential pkg-config curl git \
         libcurl4-openssl-dev libjson-c-dev
 
@@ -32,22 +28,20 @@ steps:
   - label: ":linux: Build linux-i386"
     key: build-linux-i386
     agents:
-      queue: linux
+      queue: default
     plugins:
       - docker#v5.11.0:
           image: ubuntu:latest
           propagate-environment: true
-          privileged: true
     command: |
       set -euo pipefail
       export DEBIAN_FRONTEND=noninteractive
-      apt-get update
+      apt-get update -q
       apt-get install -y build-essential pkg-config curl git \
         libcurl4-openssl-dev libjson-c-dev
 
-      # i386
       dpkg --add-architecture i386
-      apt-get update
+      apt-get update -q
       apt-get install -y \
         gcc-multilib \
         libc6-dev-i386 \
@@ -70,28 +64,26 @@ steps:
   - label: ":linux: Build linux-arm64"
     key: build-linux-arm64
     agents:
-      queue: linux
+      queue: default
     plugins:
       - docker#v5.11.0:
           image: ubuntu:latest
           propagate-environment: true
-          privileged: true
     command: |
       set -euo pipefail
       export DEBIAN_FRONTEND=noninteractive
       CODENAME=$(grep VERSION_CODENAME /etc/os-release | cut -d= -f2)
 
-      apt-get update
+      apt-get update -q
       apt-get install -y build-essential pkg-config curl git \
         libcurl4-openssl-dev libjson-c-dev
 
-      # arm64
       dpkg --add-architecture arm64
       apt-get install -y gcc-aarch64-linux-gnu
       sed -i 's/deb http/deb [arch=amd64] http/g' /etc/apt/sources.list
       echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $CODENAME main universe" >> /etc/apt/sources.list
       echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $CODENAME-updates main universe" >> /etc/apt/sources.list
-      apt-get update || true
+      apt-get update -q || true
       apt-get install -y linux-libc-dev:arm64 libjson-c-dev:arm64
       apt-get install -y -o Dpkg::Options::="--force-overwrite" libcurl4-openssl-dev:arm64
 
@@ -110,28 +102,26 @@ steps:
   - label: ":linux: Build linux-armhf"
     key: build-linux-armhf
     agents:
-      queue: linux
+      queue: default
     plugins:
       - docker#v5.11.0:
           image: ubuntu:latest
           propagate-environment: true
-          privileged: true
     command: |
       set -euo pipefail
       export DEBIAN_FRONTEND=noninteractive
       CODENAME=$(grep VERSION_CODENAME /etc/os-release | cut -d= -f2)
 
-      apt-get update
+      apt-get update -q
       apt-get install -y build-essential pkg-config curl git \
         libcurl4-openssl-dev libjson-c-dev
 
-      # armhf
       dpkg --add-architecture armhf
       apt-get install -y gcc-arm-linux-gnueabihf
       sed -i 's/deb http/deb [arch=amd64] http/g' /etc/apt/sources.list
       echo "deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports $CODENAME main universe" >> /etc/apt/sources.list
       echo "deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports $CODENAME-updates main universe" >> /etc/apt/sources.list
-      apt-get update || true
+      apt-get update -q || true
       apt-get install -y linux-libc-dev:armhf libjson-c-dev:armhf
       apt-get install -y -o Dpkg::Options::="--force-overwrite" libcurl4-openssl-dev:armhf
 
@@ -147,137 +137,36 @@ steps:
       tar -czf cdrive-linux-armhf.tar.gz -C dist cdrive
       buildkite-agent artifact upload cdrive-linux-armhf.tar.gz
 
-  # ────────────────────────────────────────────
-  # MACOS BUILDS (dedicated macOS agents)
-  # ────────────────────────────────────────────
-
-  - label: ":apple: Build darwin-x86_64"
-    key: build-darwin-x86_64
-    agents:
-      queue: macos-x86_64
-    command: |
-      set -euo pipefail
-      brew install curl json-c pkg-config
-
-      make clean
-      export PKG_CONFIG_PATH="$(brew --prefix)/lib/pkgconfig:$PKG_CONFIG_PATH"
-      CFLAGS="-arch x86_64 $(pkg-config --cflags libcurl json-c)"
-      LIBS="$(pkg-config --libs libcurl json-c)"
-      make CFLAGS="$CFLAGS" LIBS="$LIBS"
-
-      mkdir -p dist
-      cp out/dist/cdrive dist/
-      tar -czf cdrive-darwin-x86_64.tar.gz -C dist cdrive
-      buildkite-agent artifact upload cdrive-darwin-x86_64.tar.gz
-
-  - label: ":apple: Build darwin-arm64"
-    key: build-darwin-arm64
-    agents:
-      queue: macos-arm64
-    command: |
-      set -euo pipefail
-      brew install curl json-c pkg-config
-
-      make clean
-      export PKG_CONFIG_PATH="$(brew --prefix)/lib/pkgconfig:$PKG_CONFIG_PATH"
-      CFLAGS="-arch arm64 $(pkg-config --cflags libcurl json-c)"
-      LIBS="$(pkg-config --libs libcurl json-c)"
-      make CFLAGS="$CFLAGS" LIBS="$LIBS"
-
-      mkdir -p dist
-      cp out/dist/cdrive dist/
-      tar -czf cdrive-darwin-arm64.tar.gz -C dist cdrive
-      buildkite-agent artifact upload cdrive-darwin-arm64.tar.gz
-
-  # ────────────────────────────────────────────
-  # WINDOWS BUILDS (dedicated Windows agents)
-  # ────────────────────────────────────────────
-
-  - label: ":windows: Build windows-x86_64"
-    key: build-windows-x86_64
-    agents:
-      queue: windows
-    command: |
-      C:\msys64\usr\bin\bash.exe -lc "
-        set -euo pipefail
-        export MSYSTEM=MINGW64
-        source /etc/profile
-        pacman -Sy --noconfirm mingw-w64-x86_64-gcc mingw-w64-x86_64-make \
-          mingw-w64-x86_64-curl mingw-w64-x86_64-json-c make
-
-        make clean
-        make LIBS='-lcurl -ljson-c -lws2_32'
-
-        mkdir -p dist
-        cp out/dist/cdrive.exe dist/
-        tar -czf cdrive-windows-x86_64.tar.gz -C dist cdrive.exe
-      "
-      buildkite-agent artifact upload cdrive-windows-x86_64.tar.gz
-
-  - label: ":windows: Build windows-i386"
-    key: build-windows-i386
-    agents:
-      queue: windows
-    command: |
-      C:\msys64\usr\bin\bash.exe -lc "
-        set -euo pipefail
-        export MSYSTEM=MINGW32
-        source /etc/profile
-        pacman -Sy --noconfirm mingw-w64-i686-gcc mingw-w64-i686-make \
-          mingw-w64-i686-curl mingw-w64-i686-json-c make
-
-        make clean
-        make LIBS='-lcurl -ljson-c -lws2_32'
-
-        mkdir -p dist
-        cp out/dist/cdrive.exe dist/
-        tar -czf cdrive-windows-i386.tar.gz -C dist cdrive.exe
-      "
-      buildkite-agent artifact upload cdrive-windows-i386.tar.gz
-
-  # ────────────────────────────────────────────
-  # WAIT FOR ALL BUILDS
-  # ────────────────────────────────────────────
-
   - wait: ~
     continue_on_failure: false
-
-  # ────────────────────────────────────────────
-  # COMBINE ALL ARTIFACTS
-  # ────────────────────────────────────────────
 
   - label: ":package: Combine all artifacts"
     key: combine-artifacts
     agents:
-      queue: linux
+      queue: default
+    plugins:
+      - docker#v5.11.0:
+          image: ubuntu:latest
     command: |
       set -euo pipefail
       mkdir -p combined
 
       buildkite-agent artifact download "cdrive-*.tar.gz" combined/
 
-      ls -la combined/
-
-      # Create combined bundle
       cd combined
       tar -czf "cdrive-all-platforms.tar.gz" cdrive-*.tar.gz
       sha256sum cdrive-*.tar.gz > checksums.txt
       ls -la
 
-      buildkite-agent artifact upload "combined/cdrive-all-platforms.tar.gz"
-      buildkite-agent artifact upload "combined/checksums.txt"
-
-  # ────────────────────────────────────────────
-  # CREATE GITHUB RELEASE
-  # (runs only on main/master branch)
-  # ────────────────────────────────────────────
+      buildkite-agent artifact upload "cdrive-all-platforms.tar.gz"
+      buildkite-agent artifact upload "checksums.txt"
 
   - label: ":rocket: Create GitHub Release"
     key: create-release
     depends_on: combine-artifacts
     branches: "main master"
     agents:
-      queue: linux
+      queue: default
     plugins:
       - docker#v5.11.0:
           image: ubuntu:latest
@@ -287,7 +176,7 @@ steps:
       set -euo pipefail
       export DEBIAN_FRONTEND=noninteractive
       apt-get update -q
-      apt-get install -y -q curl git jq
+      apt-get install -y curl git jq
 
       # Install GitHub CLI
       curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
@@ -308,24 +197,17 @@ steps:
       fi
       echo "Version: $VERSION"
 
-      # Download all artifacts
       mkdir -p release
       buildkite-agent artifact download "cdrive-*.tar.gz" release/
       buildkite-agent artifact download "checksums.txt" release/
 
-      # Generate checksums for the full bundle too
       cd release
-      sha256sum *.tar.gz > checksums.txt
-
-      # Create release
       TAG_NAME="v${VERSION}"
       gh release create "${TAG_NAME}" \
         --title "CDrive v${VERSION}" \
-        --notes "Release v${VERSION} — built for linux-x86_64, linux-i386, linux-arm64, linux-armhf, darwin-x86_64, darwin-arm64, windows-x86_64, windows-i386" \
+        --notes "Release v${VERSION} — linux-x86_64, linux-i386, linux-arm64, linux-armhf" \
         --repo "${BUILDKITE_REPO}" \
         *.tar.gz \
         checksums.txt
 
-      echo "Release created: $(gh release view $TAG_NAME --json url --jq '.url')"
-    env:
-      GITHUB_TOKEN: "${GITHUB_TOKEN}"
+      echo "Release: $(gh release view $TAG_NAME --json url --jq '.url')"
