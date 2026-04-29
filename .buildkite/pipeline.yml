@@ -10,6 +10,7 @@ steps:
       - docker#v5.11.0:
           image: ubuntu:latest
           propagate-environment: true
+          shell: ["/bin/bash", "-e", "-c"]
     command: |
       set -euo pipefail
       export DEBIAN_FRONTEND=noninteractive
@@ -33,6 +34,7 @@ steps:
       - docker#v5.11.0:
           image: ubuntu:latest
           propagate-environment: true
+          shell: ["/bin/bash", "-e", "-c"]
     command: |
       set -euo pipefail
       export DEBIAN_FRONTEND=noninteractive
@@ -69,6 +71,7 @@ steps:
       - docker#v5.11.0:
           image: ubuntu:latest
           propagate-environment: true
+          shell: ["/bin/bash", "-e", "-c"]
     command: |
       set -euo pipefail
       export DEBIAN_FRONTEND=noninteractive
@@ -107,6 +110,7 @@ steps:
       - docker#v5.11.0:
           image: ubuntu:latest
           propagate-environment: true
+          shell: ["/bin/bash", "-e", "-c"]
     command: |
       set -euo pipefail
       export DEBIAN_FRONTEND=noninteractive
@@ -147,6 +151,8 @@ steps:
     plugins:
       - docker#v5.11.0:
           image: ubuntu:latest
+          propagate-environment: true
+          shell: ["/bin/bash", "-e", "-c"]
     command: |
       set -euo pipefail
       mkdir -p combined
@@ -170,6 +176,8 @@ steps:
     plugins:
       - docker#v5.11.0:
           image: ubuntu:latest
+          propagate-environment: true
+          shell: ["/bin/bash", "-e", "-c"]
           environment:
             - GITHUB_TOKEN
     command: |
