@@ -8,7 +8,7 @@ steps:
       queue: default
     plugins:
       - docker#v5.11.0:
-          image: ubuntu:latest
+          image: ubuntu:22.04
           propagate-environment: true
           shell: ["/bin/bash", "-e", "-c"]
           mount-buildkite-agent: true
@@ -33,7 +33,7 @@ steps:
       queue: default
     plugins:
       - docker#v5.11.0:
-          image: ubuntu:latest
+          image: ubuntu:22.04
           propagate-environment: true
           shell: ["/bin/bash", "-e", "-c"]
           mount-buildkite-agent: true
@@ -71,14 +71,13 @@ steps:
       queue: default
     plugins:
       - docker#v5.11.0:
-          image: ubuntu:latest
+          image: ubuntu:22.04
           propagate-environment: true
           shell: ["/bin/bash", "-e", "-c"]
           mount-buildkite-agent: true
     command: |
       set -euo pipefail
       export DEBIAN_FRONTEND=noninteractive
-      CODENAME=$(grep VERSION_CODENAME /etc/os-release | cut -d= -f2)
 
       apt-get update -q
       apt-get install -y build-essential pkg-config curl git \
@@ -87,8 +86,8 @@ steps:
       dpkg --add-architecture arm64
       apt-get install -y gcc-aarch64-linux-gnu
       sed -i 's/deb http/deb [arch=amd64] http/g' /etc/apt/sources.list
-      echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $CODENAME main universe" >> /etc/apt/sources.list
-      echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $CODENAME-updates main universe" >> /etc/apt/sources.list
+      echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports jammy main universe" >> /etc/apt/sources.list
+      echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports jammy-updates main universe" >> /etc/apt/sources.list
       apt-get update -q || true
       apt-get install -y linux-libc-dev:arm64 libjson-c-dev:arm64
       apt-get install -y -o Dpkg::Options::="--force-overwrite" libcurl4-openssl-dev:arm64
@@ -111,14 +110,13 @@ steps:
       queue: default
     plugins:
       - docker#v5.11.0:
-          image: ubuntu:latest
+          image: ubuntu:22.04
           propagate-environment: true
           shell: ["/bin/bash", "-e", "-c"]
           mount-buildkite-agent: true
     command: |
       set -euo pipefail
       export DEBIAN_FRONTEND=noninteractive
-      CODENAME=$(grep VERSION_CODENAME /etc/os-release | cut -d= -f2)
 
       apt-get update -q
       apt-get install -y build-essential pkg-config curl git \
@@ -127,8 +125,8 @@ steps:
       dpkg --add-architecture armhf
       apt-get install -y gcc-arm-linux-gnueabihf
       sed -i 's/deb http/deb [arch=amd64] http/g' /etc/apt/sources.list
-      echo "deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports $CODENAME main universe" >> /etc/apt/sources.list
-      echo "deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports $CODENAME-updates main universe" >> /etc/apt/sources.list
+      echo "deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports jammy main universe" >> /etc/apt/sources.list
+      echo "deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports jammy-updates main universe" >> /etc/apt/sources.list
       apt-get update -q || true
       apt-get install -y linux-libc-dev:armhf libjson-c-dev:armhf
       apt-get install -y -o Dpkg::Options::="--force-overwrite" libcurl4-openssl-dev:armhf
@@ -154,7 +152,7 @@ steps:
       queue: default
     plugins:
       - docker#v5.11.0:
-          image: ubuntu:latest
+          image: ubuntu:22.04
           propagate-environment: true
           shell: ["/bin/bash", "-e", "-c"]
           mount-buildkite-agent: true
@@ -180,7 +178,7 @@ steps:
       queue: default
     plugins:
       - docker#v5.11.0:
-          image: ubuntu:latest
+          image: ubuntu:22.04
           propagate-environment: true
           shell: ["/bin/bash", "-e", "-c"]
           mount-buildkite-agent: true
