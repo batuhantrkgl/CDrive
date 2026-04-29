@@ -189,8 +189,8 @@ steps:
       set -euo pipefail
 
       # Debug: check if GH_TOKEN is available
-      echo "GH_TOKEN set: ${GH_TOKEN:+yes}"
-      echo "GH_TOKEN length: ${#GH_TOKEN}"
+      echo "GH_TOKEN set: $${GH_TOKEN:+yes}"
+      echo "GH_TOKEN length: $${#GH_TOKEN}"
 
       export DEBIAN_FRONTEND=noninteractive
       apt-get update -q
