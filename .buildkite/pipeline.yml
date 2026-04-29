@@ -186,7 +186,7 @@ steps:
           shell: ["/bin/bash", "-e", "-c"]
           mount-buildkite-agent: true
           environment:
-            - GITHUB_TOKEN
+            - GH_TOKEN  # ← was GITHUB_TOKEN
     command: |
       set -euo pipefail
       export DEBIAN_FRONTEND=noninteractive
