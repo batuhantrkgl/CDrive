@@ -22,8 +22,8 @@ apt-get update
 apt-get install -y \
     gcc-multilib \
     libc6-dev-i386 \
-    libcurl4-openssl-dev:i386 \
     libjson-c-dev:i386
+apt-get install -y -o Dpkg::Options::="--force-overwrite" libcurl4-openssl-dev:i386
 
 echo "--- :linux: Installing cross-compilation tools (arm64)"
 apt-get install -y gcc-aarch64-linux-gnu
@@ -34,7 +34,8 @@ echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $CODENAME main unive
 echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $CODENAME-updates main universe" >> /etc/apt/sources.list
 
 apt-get update || true # Ignore errors from missing archs in main repos
-apt-get install -y libcurl4-openssl-dev:arm64 libjson-c-dev:arm64
+apt-get install -y libjson-c-dev:arm64
+apt-get install -y -o Dpkg::Options::="--force-overwrite" libcurl4-openssl-dev:arm64
 
 echo "--- :hammer: Building Native"
 make
