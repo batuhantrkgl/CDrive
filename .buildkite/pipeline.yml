@@ -185,10 +185,11 @@ steps:
           propagate-environment: true
           shell: ["/bin/bash", "-e", "-c"]
           mount-buildkite-agent: true
+          environment:
+            - GH_TOKEN
     command: |
       set -euo pipefail
 
-      # Debug: check if GH_TOKEN is available
       echo "GH_TOKEN set: $${GH_TOKEN:+yes}"
       echo "GH_TOKEN length: $${#GH_TOKEN}"
 
@@ -196,7 +197,6 @@ steps:
       apt-get update -q
       apt-get install -y ca-certificates curl git jq
 
-      # Install GitHub CLI
       curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
         | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
       echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] \
@@ -205,7 +205,6 @@ steps:
       apt-get update -q
       apt-get install -y gh
 
-      # Extract version from cdrive.h
       VERSION=$(grep 'CDRIVE_VERSION' cdrive.h | head -1 | cut -d'"' -f2)
       if [[ -z "$VERSION" ]]; then
         DATE=$(date +'%Y.%m.%d')
