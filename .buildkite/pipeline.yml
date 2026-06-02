@@ -7,6 +7,7 @@ steps:
     plugins:
       - docker#v5.12.0:
           image: "alpine:3.20"
+          shell: ["/bin/sh", "-e", "-c"]
           workdir: "/build"
           environment:
             - BUILDKITE_TAG
@@ -20,11 +21,13 @@ steps:
       apk add --no-cache git
 
       VERSION=$$(grep 'CDRIVE_VERSION' cdrive.h | head -1 | cut -d'"' -f2)
-      SHORT_SHA=$$(git rev-parse --short HEAD 2>/dev/null || echo "$${BUILDKITE_COMMIT:0:7}")
+      SHORT_SHA=$$(git rev-parse --short HEAD 2>/dev/null || echo "$${BUILDKITE_COMMIT}" | cut -c1-7)
 
-      if [[ -n "$${BUILDKITE_TAG}" ]] && [[ "$${BUILDKITE_TAG}" =~ ^v ]]; then
-        VERSION="$${BUILDKITE_TAG}"
-        IS_TAG="true"
+      if [ -n "$${BUILDKITE_TAG}" ]; then
+        case "$${BUILDKITE_TAG}" in
+          v*) VERSION="$${BUILDKITE_TAG}"; IS_TAG="true" ;;
+          *)  VERSION="v$${VERSION}-beta.$${SHORT_SHA}"; IS_TAG="false" ;;
+        esac
       else
         VERSION="v$${VERSION}-beta.$${SHORT_SHA}"
         IS_TAG="false"
@@ -49,6 +52,7 @@ steps:
     plugins:
       - docker#v5.12.0:
           image: "ubuntu:22.04"
+          shell: ["/bin/bash", "-e", "-c"]
           workdir: "/build"
           propagate-uid-gid: false
           mount-buildkite-agent: true
@@ -71,6 +75,7 @@ steps:
     plugins:
       - docker#v5.12.0:
           image: "ubuntu:22.04"
+          shell: ["/bin/bash", "-e", "-c"]
           workdir: "/build"
           propagate-uid-gid: false
           mount-buildkite-agent: true
@@ -103,6 +108,7 @@ steps:
     plugins:
       - docker#v5.12.0:
           image: "ubuntu:22.04"
+          shell: ["/bin/bash", "-e", "-c"]
           workdir: "/build"
           propagate-uid-gid: false
           mount-buildkite-agent: true
@@ -138,6 +144,7 @@ steps:
     plugins:
       - docker#v5.12.0:
           image: "ubuntu:22.04"
+          shell: ["/bin/bash", "-e", "-c"]
           workdir: "/build"
           propagate-uid-gid: false
           mount-buildkite-agent: true
@@ -173,6 +180,7 @@ steps:
     plugins:
       - docker#v5.12.0:
           image: "ubuntu:22.04"
+          shell: ["/bin/bash", "-e", "-c"]
           workdir: "/build"
           environment:
             - GH_TOKEN
@@ -197,6 +205,7 @@ steps:
     plugins:
       - docker#v5.12.0:
           image: "ubuntu:22.04"
+          shell: ["/bin/bash", "-e", "-c"]
           workdir: "/build"
           environment:
             - GH_TOKEN
@@ -222,6 +231,7 @@ steps:
     plugins:
       - docker#v5.12.0:
           image: "ubuntu:22.04"
+          shell: ["/bin/bash", "-e", "-c"]
           workdir: "/build"
           environment:
             - GH_TOKEN
@@ -265,6 +275,7 @@ steps:
     plugins:
       - docker#v5.12.0:
           image: "ubuntu:22.04"
+          shell: ["/bin/bash", "-e", "-c"]
           workdir: "/build"
           environment:
             - GH_TOKEN
@@ -324,10 +335,10 @@ steps:
           propagate-uid-gid: false
           mount-buildkite-agent: true
     command: |
-      if [[ "$${BUILDKITE_PULL_REQUEST}" != "false" ]]; then
+      if [ "$${BUILDKITE_PULL_REQUEST}" != "false" ]; then
         echo "PR build -- skipping release"; exit 0
       fi
-      if [[ "$${BUILDKITE_BRANCH}" != "master" ]] && [[ -z "$${BUILDKITE_TAG}" ]]; then
+      if [ "$${BUILDKITE_BRANCH}" != "master" ] && [ -z "$${BUILDKITE_TAG}" ]; then
         echo "Non-master, non-tag -- skipping release"; exit 0
       fi
 
@@ -358,7 +369,7 @@ steps:
       git config user.name "Buildkite CI"
       git remote set-url origin "https://batuhantrkgl:$${GH_TOKEN}@github.com/batuhantrkgl/CDrive.git"
 
-      if [[ "$${IS_TAG}" == "true" ]]; then
+      if [ "$${IS_TAG}" = "true" ]; then
         echo "--- Creating GitHub Release $${VERSION}"
         gh release create "$${VERSION}" \
           --title "CDrive $${VERSION}" \
