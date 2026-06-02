@@ -262,7 +262,7 @@ steps:
     soft_fail: true
     plugins:
       - docker#v5.12.0:
-          image: "ubuntu:22.04"
+          image: "vvasconcellos/osxcross:12.3-564e2b9-8"
           shell: ["/bin/bash", "-e", "-c"]
           workdir: "/build"
           environment:
@@ -271,34 +271,56 @@ steps:
           mount-buildkite-agent: true
     command: |
       set -euo pipefail
-      export DEBIAN_FRONTEND=noninteractive
-      apt-get update -q
-      apt-get install -y build-essential pkg-config curl git cmake clang \
-        libxml2-dev libssl-dev libz-dev
 
-      if [[ ! -d "/osxcross" ]]; then
-        git clone --depth=1 https://github.com/tpoechtrager/osxcross.git /osxcross
-        echo "WARNING: OSXCross requires an Apple SDK (MacOSX14.sdk.tar.xz)."
-        echo "Place it in /osxcross/tarballs/ and run /osxcross/build.sh"
-        echo "Skipping macOS build."
-        mkdir -p artifacts
-        echo "not-built" > artifacts/cdrive-darwin-x86_64
-        buildkite-agent artifact upload "artifacts/cdrive-darwin-x86_64"
-        exit 0
-      fi
-
-      export PATH="/osxcross/target/bin:$PATH"
-      export CC=o64-clang
+      export OSXCROSS_SDK="/opt/osxcross/SDK/MacOSX12.3.sdk"
+      export OSXCROSS_TARGET="/opt/osxcross/target"
       export PKG_CONFIG=/bin/false
 
-      CFLAGS="-I/osxcross/target/SDK/MacOSX14.sdk/usr/include"
-      LIBS="-lcurl -ljson-c -lm -lpthread"
+      # Build json-c for macOS x86_64
+      mkdir -p "$OSXCROSS_TARGET"
+      cd /tmp
+      curl -sL https://github.com/json-c/json-c/archive/refs/tags/json-c-0.18-20240915.tar.gz | tar xz
+      cd json-c-json-c-0.18-20240915
+      cmake -B build \
+        -DCMAKE_C_COMPILER=/opt/osxcross/bin/o64-clang \
+        -DCMAKE_SYSTEM_NAME=Darwin \
+        -DCMAKE_FIND_ROOT_PATH="$OSXCROSS_TARGET" \
+        -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
+        -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
+        -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
+        -DCMAKE_INSTALL_PREFIX="$OSXCROSS_TARGET" \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DBUILD_TESTING=OFF
+      cmake --build build -j$(nproc)
+      cmake --install build
 
+      # Build libcurl for macOS x86_64
+      cd /tmp
+      curl -sL https://curl.se/download/curl-8.12.1.tar.gz | tar xz
+      cd curl-8.12.1
+      CC=/opt/osxcross/bin/o64-clang \
+      CFLAGS="-isysroot $OSXCROSS_SDK -mmacosx-version-min=10.15" \
+      LDFLAGS="-isysroot $OSXCROSS_SDK" \
+      ./configure \
+        --host=x86_64-apple-darwin \
+        --build=x86_64-pc-linux-gnu \
+        --with-sysroot="$OSXCROSS_SDK" \
+        --prefix="$OSXCROSS_TARGET" \
+        --enable-static --disable-shared \
+        --without-ssl --without-libssh2 --without-nghttp2 --without-libpsl \
+        --disable-ldap --disable-ldaps --disable-rtsp --disable-dict \
+        --disable-telnet --disable-tftp --disable-pop3 --disable-imap \
+        --disable-smtp --disable-gopher --disable-mqtt --disable-manual
+      make -j$(nproc)
+      make install
+
+      # Build cdrive for macOS x86_64
+      cd /build
       make clean
-      make CC="$CC" CFLAGS="$CFLAGS" LIBS="$LIBS"
+      make darwin-x86_64
 
       mkdir -p artifacts
-      cp out/dist/cdrive artifacts/cdrive-darwin-x86_64
+      cp out/dist/cdrive-darwin-x86_64 artifacts/cdrive-darwin-x86_64
       buildkite-agent artifact upload "artifacts/cdrive-darwin-x86_64"
 
   - label: ":mac: Build darwin-arm64"
@@ -306,7 +328,7 @@ steps:
     soft_fail: true
     plugins:
       - docker#v5.12.0:
-          image: "ubuntu:22.04"
+          image: "vvasconcellos/osxcross:12.3-564e2b9-8"
           shell: ["/bin/bash", "-e", "-c"]
           workdir: "/build"
           environment:
@@ -315,34 +337,56 @@ steps:
           mount-buildkite-agent: true
     command: |
       set -euo pipefail
-      export DEBIAN_FRONTEND=noninteractive
-      apt-get update -q
-      apt-get install -y build-essential pkg-config curl git cmake clang \
-        libxml2-dev libssl-dev libz-dev
 
-      if [[ ! -d "/osxcross" ]]; then
-        git clone --depth=1 https://github.com/tpoechtrager/osxcross.git /osxcross
-        echo "WARNING: OSXCross requires an Apple SDK (MacOSX14.sdk.tar.xz)."
-        echo "Place it in /osxcross/tarballs/ and run /osxcross/build.sh"
-        echo "Skipping macOS ARM64 build."
-        mkdir -p artifacts
-        echo "not-built" > artifacts/cdrive-darwin-arm64
-        buildkite-agent artifact upload "artifacts/cdrive-darwin-arm64"
-        exit 0
-      fi
-
-      export PATH="/osxcross/target/bin:$PATH"
-      export CC=oa64-clang
+      export OSXCROSS_SDK="/opt/osxcross/SDK/MacOSX12.3.sdk"
+      export OSXCROSS_TARGET="/opt/osxcross/target"
       export PKG_CONFIG=/bin/false
 
-      CFLAGS="-I/osxcross/target/SDK/MacOSX14.sdk/usr/include"
-      LIBS="-lcurl -ljson-c -lm -lpthread"
+      # Build json-c for macOS arm64
+      mkdir -p "$OSXCROSS_TARGET"
+      cd /tmp
+      curl -sL https://github.com/json-c/json-c/archive/refs/tags/json-c-0.18-20240915.tar.gz | tar xz
+      cd json-c-json-c-0.18-20240915
+      cmake -B build \
+        -DCMAKE_C_COMPILER=/opt/osxcross/bin/oa64-clang \
+        -DCMAKE_SYSTEM_NAME=Darwin \
+        -DCMAKE_FIND_ROOT_PATH="$OSXCROSS_TARGET" \
+        -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
+        -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
+        -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
+        -DCMAKE_INSTALL_PREFIX="$OSXCROSS_TARGET" \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DBUILD_TESTING=OFF
+      cmake --build build -j$(nproc)
+      cmake --install build
 
+      # Build libcurl for macOS arm64
+      cd /tmp
+      curl -sL https://curl.se/download/curl-8.12.1.tar.gz | tar xz
+      cd curl-8.12.1
+      CC=/opt/osxcross/bin/oa64-clang \
+      CFLAGS="-isysroot $OSXCROSS_SDK -mmacosx-version-min=11.0" \
+      LDFLAGS="-isysroot $OSXCROSS_SDK" \
+      ./configure \
+        --host=aarch64-apple-darwin \
+        --build=x86_64-pc-linux-gnu \
+        --with-sysroot="$OSXCROSS_SDK" \
+        --prefix="$OSXCROSS_TARGET" \
+        --enable-static --disable-shared \
+        --without-ssl --without-libssh2 --without-nghttp2 --without-libpsl \
+        --disable-ldap --disable-ldaps --disable-rtsp --disable-dict \
+        --disable-telnet --disable-tftp --disable-pop3 --disable-imap \
+        --disable-smtp --disable-gopher --disable-mqtt --disable-manual
+      make -j$(nproc)
+      make install
+
+      # Build cdrive for macOS arm64
+      cd /build
       make clean
-      make CC="$CC" CFLAGS="$CFLAGS" LIBS="$LIBS"
+      make darwin-arm64
 
       mkdir -p artifacts
-      cp out/dist/cdrive artifacts/cdrive-darwin-arm64
+      cp out/dist/cdrive-darwin-arm64 artifacts/cdrive-darwin-arm64
       buildkite-agent artifact upload "artifacts/cdrive-darwin-arm64"
 
   - wait: ~

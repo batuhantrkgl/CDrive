@@ -68,7 +68,7 @@ CC_linux-armv7 = arm-linux-gnueabihf-gcc
 CC_windows-x86_64 = x86_64-w64-mingw32-gcc
 CC_windows-i386 = i686-w64-mingw32-gcc
 CC_darwin-x86_64 = o64-clang
-CC_darwin-arm64 = o64-clang
+CC_darwin-arm64 = oa64-clang
 
 # Platform-specific settings
 LDFLAGS_windows-x86_64 = -static
@@ -87,6 +87,11 @@ TARGET_CFLAGS_windows-x86_64 = -I/usr/x86_64-w64-mingw32/include -DCURL_STATICLI
 TARGET_CFLAGS_windows-i386 = -I/usr/i686-w64-mingw32/include -DCURL_STATICLIB -DJSON_C_STATICLIB
 TARGET_LDFLAGS_windows-x86_64 = -L/usr/x86_64-w64-mingw32/lib
 TARGET_LDFLAGS_windows-i386 = -L/usr/i686-w64-mingw32/lib
+
+TARGET_CFLAGS_darwin-x86_64 = -I/opt/osxcross/target/include -I/opt/osxcross/SDK/MacOSX12.3.sdk/usr/include -DCURL_STATICLIB -DJSON_C_STATICLIB
+TARGET_CFLAGS_darwin-arm64 = -I/opt/osxcross/target/include -I/opt/osxcross/SDK/MacOSX12.3.sdk/usr/include -DCURL_STATICLIB -DJSON_C_STATICLIB
+TARGET_LDFLAGS_darwin-x86_64 = -L/opt/osxcross/target/lib
+TARGET_LDFLAGS_darwin-arm64 = -L/opt/osxcross/target/lib
 
 
 # Object files
