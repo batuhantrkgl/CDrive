@@ -192,21 +192,19 @@ steps:
       apt-get update -q
       apt-get install -y build-essential pkg-config curl git cmake gcc-mingw-w64-x86-64 mingw-w64-tools
 
-      export BUILD_DEPS=/tmp/build-deps
-      export PREFIX=/usr/x86_64-w64-mingw32
-      mkdir -p "$BUILD_DEPS" "$PREFIX"
+      mkdir -p /tmp/build-deps /usr/x86_64-w64-mingw32
 
-      cd "$BUILD_DEPS"
+      cd /tmp/build-deps
       curl -sL https://github.com/json-c/json-c/archive/refs/tags/json-c-0.18-20240915.tar.gz | tar xz
       cd json-c-json-c-0.18-20240915
-      cmake -B build -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc -DCMAKE_FIND_ROOT_PATH="$PREFIX" -DCMAKE_INSTALL_PREFIX="$PREFIX" -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTING=OFF
+      cmake -B build -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc -DCMAKE_FIND_ROOT_PATH=/usr/x86_64-w64-mingw32 -DCMAKE_INSTALL_PREFIX=/usr/x86_64-w64-mingw32 -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTING=OFF
       cmake --build build -j$(nproc)
       cmake --install build
 
-      cd "$BUILD_DEPS"
+      cd /tmp/build-deps
       curl -sL https://curl.se/download/curl-8.12.1.tar.gz | tar xz
       cd curl-8.12.1
-      ./configure --host=x86_64-w64-mingw32 --prefix="$PREFIX" --enable-static --disable-shared --without-ssl --without-libssh2 --without-nghttp2 --disable-ldap --disable-ldaps --disable-rtsp --disable-dict --disable-telnet --disable-tftp --disable-pop3 --disable-imap --disable-smtp --disable-gopher --disable-mqtt --disable-manual
+      ./configure --host=x86_64-w64-mingw32 --prefix=/usr/x86_64-w64-mingw32 --enable-static --disable-shared --without-ssl --without-libssh2 --without-nghttp2 --disable-ldap --disable-ldaps --disable-rtsp --disable-dict --disable-telnet --disable-tftp --disable-pop3 --disable-imap --disable-smtp --disable-gopher --disable-mqtt --disable-manual
       make -j$(nproc)
       make install
 
@@ -234,21 +232,19 @@ steps:
       apt-get update -q
       apt-get install -y build-essential pkg-config curl git cmake gcc-mingw-w64-i686 mingw-w64-tools
 
-      export BUILD_DEPS=/tmp/build-deps
-      export PREFIX=/usr/i686-w64-mingw32
-      mkdir -p "$BUILD_DEPS" "$PREFIX"
+      mkdir -p /tmp/build-deps /usr/i686-w64-mingw32
 
-      cd "$BUILD_DEPS"
+      cd /tmp/build-deps
       curl -sL https://github.com/json-c/json-c/archive/refs/tags/json-c-0.18-20240915.tar.gz | tar xz
       cd json-c-json-c-0.18-20240915
-      cmake -B build -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_C_COMPILER=i686-w64-mingw32-gcc -DCMAKE_FIND_ROOT_PATH="$PREFIX" -DCMAKE_INSTALL_PREFIX="$PREFIX" -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTING=OFF
+      cmake -B build -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_C_COMPILER=i686-w64-mingw32-gcc -DCMAKE_FIND_ROOT_PATH=/usr/i686-w64-mingw32 -DCMAKE_INSTALL_PREFIX=/usr/i686-w64-mingw32 -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTING=OFF
       cmake --build build -j$(nproc)
       cmake --install build
 
-      cd "$BUILD_DEPS"
+      cd /tmp/build-deps
       curl -sL https://curl.se/download/curl-8.12.1.tar.gz | tar xz
       cd curl-8.12.1
-      ./configure --host=i686-w64-mingw32 --prefix="$PREFIX" --enable-static --disable-shared --without-ssl --without-libssh2 --without-nghttp2 --disable-ldap --disable-ldaps --disable-rtsp --disable-dict --disable-telnet --disable-tftp --disable-pop3 --disable-imap --disable-smtp --disable-gopher --disable-mqtt --disable-manual
+      ./configure --host=i686-w64-mingw32 --prefix=/usr/i686-w64-mingw32 --enable-static --disable-shared --without-ssl --without-libssh2 --without-nghttp2 --disable-ldap --disable-ldaps --disable-rtsp --disable-dict --disable-telnet --disable-tftp --disable-pop3 --disable-imap --disable-smtp --disable-gopher --disable-mqtt --disable-manual
       make -j$(nproc)
       make install
 
