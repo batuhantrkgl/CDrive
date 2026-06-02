@@ -77,7 +77,7 @@ EXT_windows-x86_64 = .exe
 EXT_windows-i386 = .exe
 
 # Define platform-specific libraries for cross-compilation
-LIBS_windows = -lcurl -ljson-c -lws2_32 -lm
+LIBS_windows = -lcurl -ljson-c -lws2_32 -lm -lpthread
 LIBS_linux = -lcurl -ljson-c -lm -lpthread
 LIBS_darwin = -lcurl -ljson-c -lm -lpthread
 
