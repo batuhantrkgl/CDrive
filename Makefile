@@ -81,6 +81,13 @@ LIBS_windows = -lcurl -ljson-c -lws2_32 -lm
 LIBS_linux = -lcurl -ljson-c -lm -lpthread
 LIBS_darwin = -lcurl -ljson-c -lm -lpthread
 
+# Default per-target CFLAGS and LDFLAGS for cross-compilation
+# These can be overridden via environment or make arguments
+TARGET_CFLAGS_windows-x86_64 = -I/usr/x86_64-w64-mingw32/include
+TARGET_CFLAGS_windows-i386 = -I/usr/i686-w64-mingw32/include
+TARGET_LDFLAGS_windows-x86_64 = -L/usr/x86_64-w64-mingw32/lib
+TARGET_LDFLAGS_windows-i386 = -L/usr/i686-w64-mingw32/lib
+
 
 # Object files
 OBJECTS = $(SOURCES:%.c=$(OBJ_DIR)/%.o)
@@ -123,7 +130,7 @@ cross-$(1): $(DIST_DIR)/$(PROJECT_NAME)-$(1)$(EXT_$(1))
 $(DIST_DIR)/$(PROJECT_NAME)-$(1)$(EXT_$(1)): $(SOURCES) cdrive.h | $(DIST_DIR)
 	@printf "$(YELLOW)Cross-compiling for $(BOLD)$(1)$(RESET)$(YELLOW)...$(RESET)\n"
 	@if command -v $(CC_$(1)) >/dev/null 2>&1; then \
-		$(CC_$(1)) $(CFLAGS) $(LDFLAGS_$(1)) $(SOURCES) -o $$@ $(LIBS_$(word 1,$(subst -, ,$(1)))) && \
+		$(CC_$(1)) $(CFLAGS) $(TARGET_CFLAGS_$(1)) $(LDFLAGS_$(1)) $(TARGET_LDFLAGS_$(1)) $(SOURCES) -o $$@ $(LIBS_$(word 1,$(subst -, ,$(1)))) && \
 		printf "$(GREEN)Cross-compilation complete: $(BOLD)$$@$(RESET)\n" || \
 		(printf "$(RED)Cross-compilation failed for $(1)$(RESET)\n"; exit 1); \
 	else \
