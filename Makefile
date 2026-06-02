@@ -83,8 +83,8 @@ LIBS_darwin = -lcurl -ljson-c -lm -lpthread
 
 # Default per-target CFLAGS and LDFLAGS for cross-compilation
 # These can be overridden via environment or make arguments
-TARGET_CFLAGS_windows-x86_64 = -I/usr/x86_64-w64-mingw32/include
-TARGET_CFLAGS_windows-i386 = -I/usr/i686-w64-mingw32/include
+TARGET_CFLAGS_windows-x86_64 = -I/usr/x86_64-w64-mingw32/include -DCURL_STATICLIB -DJSON_C_STATICLIB
+TARGET_CFLAGS_windows-i386 = -I/usr/i686-w64-mingw32/include -DCURL_STATICLIB -DJSON_C_STATICLIB
 TARGET_LDFLAGS_windows-x86_64 = -L/usr/x86_64-w64-mingw32/lib
 TARGET_LDFLAGS_windows-i386 = -L/usr/i686-w64-mingw32/lib
 
