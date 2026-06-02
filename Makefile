@@ -79,7 +79,7 @@ EXT_windows-i386 = .exe
 # Define platform-specific libraries for cross-compilation
 LIBS_windows = -lcurl -ljson-c -lws2_32 -lm -lpthread
 LIBS_linux = -lcurl -ljson-c -lm -lpthread
-LIBS_darwin = -lcurl -ljson-c -lm -lpthread
+LIBS_darwin = /opt/osxcross/target/lib/libcurl.a /opt/osxcross/target/lib/libjson-c.a -lm -lpthread
 
 # Default per-target CFLAGS and LDFLAGS for cross-compilation
 # These can be overridden via environment or make arguments

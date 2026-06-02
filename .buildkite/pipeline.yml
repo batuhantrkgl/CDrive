@@ -314,6 +314,9 @@ steps:
 
       # Build cdrive for macOS x86_64
       cd /build
+      echo "--- Library check"
+      ls -la /opt/osxcross/target/lib/
+      file /opt/osxcross/target/lib/libcurl.a /opt/osxcross/target/lib/libjson-c.a 2>/dev/null || true
       make clean
       make darwin-x86_64
 
@@ -378,6 +381,9 @@ steps:
 
       # Build cdrive for macOS arm64
       cd /build
+      echo "--- Library check"
+      ls -la /opt/osxcross/target/lib/
+      file /opt/osxcross/target/lib/libcurl.a /opt/osxcross/target/lib/libjson-c.a 2>/dev/null || true
       make clean
       make darwin-arm64
 
