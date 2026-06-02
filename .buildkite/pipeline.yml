@@ -272,23 +272,21 @@ steps:
     command: |
       set -euo pipefail
 
-      export OSXCROSS_SDK="/opt/osxcross/SDK/MacOSX12.3.sdk"
-      export OSXCROSS_TARGET="/opt/osxcross/target"
       export PKG_CONFIG=/bin/false
 
       # Build json-c for macOS x86_64
-      mkdir -p "$OSXCROSS_TARGET"
+      mkdir -p /opt/osxcross/target
       cd /tmp
       curl -sL https://github.com/json-c/json-c/archive/refs/tags/json-c-0.18-20240915.tar.gz | tar xz
       cd json-c-json-c-0.18-20240915
       cmake -B build \
         -DCMAKE_C_COMPILER=/opt/osxcross/bin/o64-clang \
         -DCMAKE_SYSTEM_NAME=Darwin \
-        -DCMAKE_FIND_ROOT_PATH="$OSXCROSS_TARGET" \
+        -DCMAKE_FIND_ROOT_PATH=/opt/osxcross/target \
         -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
         -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
         -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
-        -DCMAKE_INSTALL_PREFIX="$OSXCROSS_TARGET" \
+        -DCMAKE_INSTALL_PREFIX=/opt/osxcross/target \
         -DBUILD_SHARED_LIBS=OFF \
         -DBUILD_TESTING=OFF
       cmake --build build -j$(nproc)
@@ -299,13 +297,13 @@ steps:
       curl -sL https://curl.se/download/curl-8.12.1.tar.gz | tar xz
       cd curl-8.12.1
       CC=/opt/osxcross/bin/o64-clang \
-      CFLAGS="-isysroot $OSXCROSS_SDK -mmacosx-version-min=10.15" \
-      LDFLAGS="-isysroot $OSXCROSS_SDK" \
+      CFLAGS="-isysroot /opt/osxcross/SDK/MacOSX12.3.sdk -mmacosx-version-min=10.15" \
+      LDFLAGS="-isysroot /opt/osxcross/SDK/MacOSX12.3.sdk" \
       ./configure \
         --host=x86_64-apple-darwin \
         --build=x86_64-pc-linux-gnu \
-        --with-sysroot="$OSXCROSS_SDK" \
-        --prefix="$OSXCROSS_TARGET" \
+        --with-sysroot=/opt/osxcross/SDK/MacOSX12.3.sdk \
+        --prefix=/opt/osxcross/target \
         --enable-static --disable-shared \
         --without-ssl --without-libssh2 --without-nghttp2 --without-libpsl \
         --disable-ldap --disable-ldaps --disable-rtsp --disable-dict \
@@ -338,23 +336,21 @@ steps:
     command: |
       set -euo pipefail
 
-      export OSXCROSS_SDK="/opt/osxcross/SDK/MacOSX12.3.sdk"
-      export OSXCROSS_TARGET="/opt/osxcross/target"
       export PKG_CONFIG=/bin/false
 
       # Build json-c for macOS arm64
-      mkdir -p "$OSXCROSS_TARGET"
+      mkdir -p /opt/osxcross/target
       cd /tmp
       curl -sL https://github.com/json-c/json-c/archive/refs/tags/json-c-0.18-20240915.tar.gz | tar xz
       cd json-c-json-c-0.18-20240915
       cmake -B build \
         -DCMAKE_C_COMPILER=/opt/osxcross/bin/oa64-clang \
         -DCMAKE_SYSTEM_NAME=Darwin \
-        -DCMAKE_FIND_ROOT_PATH="$OSXCROSS_TARGET" \
+        -DCMAKE_FIND_ROOT_PATH=/opt/osxcross/target \
         -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
         -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
         -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
-        -DCMAKE_INSTALL_PREFIX="$OSXCROSS_TARGET" \
+        -DCMAKE_INSTALL_PREFIX=/opt/osxcross/target \
         -DBUILD_SHARED_LIBS=OFF \
         -DBUILD_TESTING=OFF
       cmake --build build -j$(nproc)
@@ -365,13 +361,13 @@ steps:
       curl -sL https://curl.se/download/curl-8.12.1.tar.gz | tar xz
       cd curl-8.12.1
       CC=/opt/osxcross/bin/oa64-clang \
-      CFLAGS="-isysroot $OSXCROSS_SDK -mmacosx-version-min=11.0" \
-      LDFLAGS="-isysroot $OSXCROSS_SDK" \
+      CFLAGS="-isysroot /opt/osxcross/SDK/MacOSX12.3.sdk -mmacosx-version-min=11.0" \
+      LDFLAGS="-isysroot /opt/osxcross/SDK/MacOSX12.3.sdk" \
       ./configure \
         --host=aarch64-apple-darwin \
         --build=x86_64-pc-linux-gnu \
-        --with-sysroot="$OSXCROSS_SDK" \
-        --prefix="$OSXCROSS_TARGET" \
+        --with-sysroot=/opt/osxcross/SDK/MacOSX12.3.sdk \
+        --prefix=/opt/osxcross/target \
         --enable-static --disable-shared \
         --without-ssl --without-libssh2 --without-nghttp2 --without-libpsl \
         --disable-ldap --disable-ldaps --disable-rtsp --disable-dict \
