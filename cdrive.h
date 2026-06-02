@@ -1,6 +1,13 @@
 #ifndef CDRIVE_H
 #define CDRIVE_H
 
+// Must be defined early to prevent winsock.h conflicts with winsock2.h
+#ifdef _WIN32
+    #ifndef WIN32_LEAN_AND_MEAN
+        #define WIN32_LEAN_AND_MEAN
+    #endif
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,6 +17,7 @@
 #include <curl/curl.h>
 #include <json-c/json.h>
 #include "download.h"
+#include "compat.h"
 
 // Platform-specific includes
 #ifdef _WIN32 // Windows specific definitions
@@ -26,16 +34,14 @@
     #define PATH_SEP "\\"
     #define HOME_ENV "USERPROFILE"
     #define STDIN_FILENO 0
-    #define close(fd) closesocket(fd) // For socket handles
     #define strcasecmp _stricmp
-    #define read(fd, buf, len) recv(fd, buf, len, 0) // For socket handles
-    #define write(fd, buf, len) send(fd, buf, len, 0) // For socket handles
     typedef int socklen_t;
 
 #else // For Linux/macOS (non-Windows)
     #include <sys/stat.h> // For mkdir, stat
     #include <unistd.h>   // For access, read, write, geteuid, readlink, fork, pipe
     #include <termios.h>  // For termios functions
+    #include <signal.h>   // For kill
     #include <sys/wait.h> // For waitpid
     #include <sys/socket.h> // For socket functions
     #include <netinet/in.h> // For sockaddr_in
@@ -115,6 +121,7 @@ typedef struct {
 extern ClientCredentials g_client_creds;
 extern OAuthTokens g_tokens;
 extern char g_last_upload_link[MAX_URL_SIZE];
+extern int g_json_mode;
 
 // Function declarations
 int cdrive_auth_login(int headless);
@@ -145,6 +152,7 @@ int refresh_access_token(OAuthTokens *tokens);
 int get_user_info(char *user_name, size_t name_size);
 char *get_file_mime_type(const char *filename);
 size_t write_response_callback(char *contents, size_t size, size_t nmemb, void *userp);
+int cdrive_api_get(const char *url, APIResponse *response);
 void print_usage(void);
 void print_version(void);
 void print_version_with_update_check(void);
@@ -154,6 +162,11 @@ int download_and_install_update(const UpdateInfo *update_info, int auto_install)
 int compare_versions(const char *current, const char *latest);
 int start_local_server(char *auth_code, const char *auth_url, int open_browser);
 char *url_encode(const char *str);
+
+// Search and share commands
+int cdrive_search(const char *query);
+int cdrive_share(const char *file_id, const char *email, const char *role);
+int cdrive_glob(const char *pattern, char ***results, int *count);
 
 // Interactive UI functions
 int show_interactive_menu(const char *title, const char **options, int num_options);

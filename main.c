@@ -5,8 +5,24 @@
 ClientCredentials g_client_creds;
 OAuthTokens g_tokens;
 char g_last_upload_link[MAX_URL_SIZE] = {0};
+int g_json_mode = 0;
 
 int main(int argc, char *argv[]) {
+    if (argc < 2) {
+        print_usage();
+        return 1;
+    }
+
+    // Parse global flags before command dispatch
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--json") == 0) {
+            g_json_mode = 1;
+            for (int j = i; j < argc - 1; j++) argv[j] = argv[j + 1];
+            argc--;
+            i--;
+        }
+    }
+
     if (argc < 2) {
         print_usage();
         return 1;
@@ -63,11 +79,12 @@ int main(int argc, char *argv[]) {
         } else if (strcmp(argv[2], "status") == 0) {
             if (load_tokens(&g_tokens) == 0) {
                 print_success("Authenticated and ready to use Google Drive");
-                if (strlen(g_tokens.access_token) > 20) {
-                    printf("Access token: %.20s...\n", g_tokens.access_token);
-                } else {
-                    printf("Access token: %s\n", g_tokens.access_token);
+                // Show only a truncated hash of the access token to avoid credential leakage
+                unsigned long hash = 5381;
+                for (const char *p = g_tokens.access_token; *p; p++) {
+                    hash = ((hash << 5) + hash) + (unsigned char)*p;
                 }
+                printf("Token fingerprint: %08lx\n", hash & 0xFFFFFFFF);
             } else {
                 print_error("Not authenticated. Run 'cdrive auth login' first.");
             }
@@ -82,17 +99,58 @@ int main(int argc, char *argv[]) {
             print_colored("Usage: ", COLOR_BOLD);
             printf("%s upload <source> [target_folder]\n\n", argv[0]);
             print_colored("ARGUMENTS\n", COLOR_BOLD);
-            printf("  source         Local file path to upload\n");
+            printf("  source         Local file path or glob pattern to upload\n");
             printf("  target_folder  Google Drive folder ID (optional, defaults to root)\n");
             curl_global_cleanup();
             return 1;
         }
 
-        const char *source_path = argv[2];
-        const char *target_folder = (argc > 3) ? argv[3] : "root";
-        
-        if (cdrive_upload(source_path, target_folder) != 0) {
-            fprintf(stderr, "upload failed\n");
+        const char *target_folder = "root";
+        int file_arg = 2;
+
+        // Detect if last arg is a folder ID (not a file path)
+        if (argc > 3) {
+            target_folder = argv[argc - 1];
+            file_arg = 2;
+        }
+
+        // Expand glob pattern if wildcards present; otherwise treat as literal path
+        char **expanded_files = NULL;
+        int expanded_count = 0;
+        const char *source = argv[file_arg];
+        int has_wildcard = strchr(source, '*') || strchr(source, '?') || strchr(source, '[');
+
+        if (has_wildcard) {
+            if (cdrive_glob(source, &expanded_files, &expanded_count) != 0 || expanded_count == 0) {
+                print_error("No files match the given pattern.");
+                curl_global_cleanup();
+                return 1;
+            }
+        } else {
+            expanded_files = malloc(sizeof(char *));
+            expanded_files[0] = strdup(source);
+            expanded_count = 1;
+        }
+
+        int upload_failures = 0;
+        for (int i = 0; i < expanded_count; i++) {
+            if (expanded_count > 1) {
+                printf("\n");
+                print_colored("[", COLOR_BLUE);
+                printf("%d/%d", i + 1, expanded_count);
+                print_colored("]", COLOR_BLUE);
+                printf(" Uploading: %s\n", expanded_files[i]);
+            }
+            if (cdrive_upload(expanded_files[i], target_folder) != 0) {
+                fprintf(stderr, "upload failed: %s\n", expanded_files[i]);
+                upload_failures++;
+            }
+            free(expanded_files[i]);
+        }
+        free(expanded_files);
+
+        if (upload_failures > 0) {
+            fprintf(stderr, "%d upload(s) failed\n", upload_failures);
             curl_global_cleanup();
             return 1;
         }
@@ -115,6 +173,58 @@ int main(int argc, char *argv[]) {
         printf("Creating folder '%s'...\n", folder_name);
         if (cdrive_create_folder(folder_name, parent_id) != 0) {
             print_error("Failed to create folder.");
+            curl_global_cleanup();
+            return 1;
+        }
+    } else if (strcmp(argv[1], "search") == 0) {
+        if (argc < 3) {
+            print_colored("Usage: ", COLOR_BOLD);
+            printf("%s search <query>\n\n", argv[0]);
+            print_colored("ARGUMENTS\n", COLOR_BOLD);
+            printf("  query          Search term to find files by name\n");
+            curl_global_cleanup();
+            return 1;
+        }
+
+        const char *query = argv[2];
+        if (g_json_mode) {
+            printf("{\"command\":\"search\",\"query\":\"%s\",\"results\":", query);
+        }
+        cdrive_search(query);
+        if (g_json_mode) {
+            printf("}\n");
+        }
+    } else if (strcmp(argv[1], "share") == 0) {
+        if (argc < 4) {
+            print_colored("Usage: ", COLOR_BOLD);
+            printf("%s share <file_id> --email <email> [--role reader|writer|commenter]\n\n", argv[0]);
+            print_colored("ARGUMENTS\n", COLOR_BOLD);
+            printf("  file_id        Google Drive file ID to share\n");
+            printf("  --email        Email address of the user to share with\n");
+            printf("  --role         Permission role: reader (default), writer, commenter\n");
+            curl_global_cleanup();
+            return 1;
+        }
+
+        const char *file_id = argv[2];
+        const char *email = NULL;
+        const char *role = "reader";
+
+        for (int i = 3; i < argc; i++) {
+            if (strcmp(argv[i], "--email") == 0 && i + 1 < argc) {
+                email = argv[++i];
+            } else if (strcmp(argv[i], "--role") == 0 && i + 1 < argc) {
+                role = argv[++i];
+            }
+        }
+
+        if (!email) {
+            print_error("--email is required.");
+            curl_global_cleanup();
+            return 1;
+        }
+
+        if (cdrive_share(file_id, email, role) != 0) {
             curl_global_cleanup();
             return 1;
         }
@@ -297,7 +407,9 @@ void print_usage(void) {
     printf("  %supload%s      Upload a file to a specific folder\n", COLOR_YELLOW, COLOR_RESET);
     printf("  %slist%s        List files and folders\n", COLOR_YELLOW, COLOR_RESET);
     printf("  %smkdir%s       Create a new folder\n\n", COLOR_YELLOW, COLOR_RESET);
-    printf("  %spull%s        Download a file or browse interactively\n\n", COLOR_YELLOW, COLOR_RESET);
+    printf("  %spull%s        Download a file or browse interactively\n", COLOR_YELLOW, COLOR_RESET);
+    printf("  %ssearch%s      Search files by name\n", COLOR_YELLOW, COLOR_RESET);
+    printf("  %sshare%s       Share a file with another user\n\n", COLOR_YELLOW, COLOR_RESET);
     
     print_colored("ADDITIONAL COMMANDS\n", COLOR_BOLD);
     printf("  %sversion%s     Show version information and check for updates\n", COLOR_YELLOW, COLOR_RESET);

@@ -43,11 +43,11 @@ int progress_callback(void *clientp, curl_off_t dltotal, curl_off_t dlnow, curl_
 
     if (ultotal > 0) {
         struct timespec current_time;
-        clock_gettime(CLOCK_MONOTONIC, &current_time);
+        clock_gettime_mono(&current_time);
 
         // Initialize on first call
         if (progress->start_time.tv_sec == 0) {
-            clock_gettime(CLOCK_MONOTONIC, &progress->start_time);
+            clock_gettime_mono(&progress->start_time);
             progress->last_update_time = current_time;
         }
 
@@ -56,8 +56,232 @@ int progress_callback(void *clientp, curl_off_t dltotal, curl_off_t dlnow, curl_
                                              (current_time.tv_nsec - progress->last_update_time.tv_nsec) / 1000000.0;
 
         if (elapsed_since_last_update_ms < 100.0 && ulnow < ultotal) {
-            return 0;
+    return 0;
+}
+
+int cdrive_search(const char *query) {
+    APIResponse response = {0};
+
+    if (load_tokens(&g_tokens) != 0) {
+        print_error("Not authenticated. Run 'cdrive auth login' first.");
+        return -1;
+    }
+
+    char url[2048];
+    char *encoded_query = url_encode(query);
+    if (!encoded_query) {
+        print_error("Failed to encode search query");
+        return -1;
+    }
+
+    snprintf(url, sizeof(url),
+             "%s?q=name%%20contains%%20%%27%s%%27%%20and%%20trashed=false&fields=files(id,name,mimeType,size,modifiedTime)",
+             DRIVE_API_URL, encoded_query);
+    free(encoded_query);
+
+    CURL *curl = curl_easy_init();
+    if (!curl) {
+        print_error("Error initializing curl");
+        return -1;
+    }
+
+    char auth_header[MAX_HEADER_SIZE];
+    snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", g_tokens.access_token);
+    struct curl_slist *headers = curl_slist_append(NULL, auth_header);
+
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_response_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+
+    CURLcode res = curl_easy_perform(curl);
+    long http_code = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+
+    if (res != CURLE_OK || http_code != 200) {
+        if (response.data) free(response.data);
+        print_error("Search failed");
+        return -1;
+    }
+
+    if (response.data) {
+        json_object *root = json_tokener_parse(response.data);
+        if (root) {
+            json_object *files_array;
+            if (json_object_object_get_ex(root, "files", &files_array) &&
+                json_object_get_type(files_array) == json_type_array) {
+                int num_files = json_object_array_length(files_array);
+
+                if (g_json_mode) {
+                    printf("[");
+                    for (int i = 0; i < num_files; i++) {
+                        json_object *file_obj = json_object_array_get_idx(files_array, i);
+                        printf("%s", json_object_to_json_string(file_obj));
+                        if (i < num_files - 1) printf(",");
+                    }
+                    printf("]");
+                } else {
+                    printf("\n");
+                    if (num_files > 0) {
+                        print_colored("TYPE\tNAME\t\t\t\t\tID\n", COLOR_BOLD);
+                        print_colored("----\t----\t\t\t\t\t--\n", COLOR_BOLD);
+
+                        for (int i = 0; i < num_files; i++) {
+                            json_object *file_obj = json_object_array_get_idx(files_array, i);
+                            json_object *id_obj, *name_obj, *mime_type_obj;
+
+                            if (json_object_object_get_ex(file_obj, "id", &id_obj) &&
+                                json_object_object_get_ex(file_obj, "name", &name_obj) &&
+                                json_object_object_get_ex(file_obj, "mimeType", &mime_type_obj)) {
+                                const char *mime_type = json_object_get_string(mime_type_obj);
+                                if (strcmp(mime_type, "application/vnd.google-apps.folder") == 0) {
+                                    print_colored("[DIR] ", COLOR_CYAN);
+                                } else {
+                                    print_colored("[FILE]", COLOR_WHITE);
+                                }
+                                printf("\t%-40.40s\t", json_object_get_string(name_obj));
+                                print_colored(json_object_get_string(id_obj), COLOR_YELLOW);
+                                printf("\n");
+                            }
+                        }
+                    } else {
+                        print_info("No files found matching the search query.");
+                    }
+                }
+            }
+            json_object_put(root);
         }
+        free(response.data);
+    }
+
+    return 0;
+}
+
+int cdrive_share(const char *file_id, const char *email, const char *role) {
+    APIResponse response = {0};
+
+    if (load_tokens(&g_tokens) != 0) {
+        print_error("Not authenticated. Run 'cdrive auth login' first.");
+        return -1;
+    }
+
+    CURL *curl = curl_easy_init();
+    if (!curl) {
+        print_error("Error initializing curl");
+        return -1;
+    }
+
+    char url[1024];
+    snprintf(url, sizeof(url), "https://www.googleapis.com/drive/v3/files/%s/permissions", file_id);
+
+    char post_data[512];
+    snprintf(post_data, sizeof(post_data),
+             "{\"type\":\"user\",\"role\":\"%s\",\"emailAddress\":\"%s\"}",
+             role, email);
+
+    char auth_header[MAX_HEADER_SIZE];
+    snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", g_tokens.access_token);
+
+    struct curl_slist *headers = NULL;
+    headers = curl_slist_append(headers, auth_header);
+    headers = curl_slist_append(headers, "Content-Type: application/json");
+
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post_data);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_response_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+
+    CURLcode res = curl_easy_perform(curl);
+    long http_code = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+
+    if (res != CURLE_OK || http_code != 200) {
+        print_error("Failed to share file");
+        if (response.data) {
+            json_object *root = json_tokener_parse(response.data);
+            if (root) {
+                json_object *error_obj, *message_obj;
+                if (json_object_object_get_ex(root, "error", &error_obj) &&
+                    json_object_object_get_ex(error_obj, "message", &message_obj)) {
+                    fprintf(stderr, "API Error: %s\n", json_object_get_string(message_obj));
+                }
+                json_object_put(root);
+            }
+        }
+        if (response.data) free(response.data);
+        return -1;
+    }
+
+    if (response.data) free(response.data);
+
+    print_success("File shared successfully!");
+    printf("  File ID: %s\n", file_id);
+    printf("  Shared with: %s\n", email);
+    printf("  Role: %s\n", role);
+
+    return 0;
+}
+
+// Portable glob expansion
+#ifdef _WIN32
+    #include <io.h>
+    int cdrive_glob(const char *pattern, char ***results, int *count) {
+        struct _finddata_t fd;
+        intptr_t handle = _findfirst(pattern, &fd);
+        if (handle == -1) return -1;
+
+        int capacity = 16;
+        *results = malloc(sizeof(char *) * (size_t)capacity);
+        *count = 0;
+
+        do {
+            if (strcmp(fd.name, ".") == 0 || strcmp(fd.name, "..") == 0) continue;
+            if (*count >= capacity) {
+                capacity *= 2;
+                char **new_results = realloc(*results, sizeof(char *) * (size_t)capacity);
+                if (!new_results) { free(*results); return -1; }
+                *results = new_results;
+            }
+            (*results)[*count] = strdup(fd.name);
+            if (!(*results)[*count]) { free(*results); return -1; }
+            (*count)++;
+        } while (_findnext(handle, &fd) == 0);
+
+        _findclose(handle);
+
+        if (*count == 0) { free(*results); *results = NULL; return -1; }
+        return 0;
+    }
+#else
+    #include <glob.h>
+    int cdrive_glob(const char *pattern, char ***results, int *count) {
+        glob_t g;
+        int ret = glob(pattern, GLOB_NOCHECK | GLOB_MARK, NULL, &g);
+        if (ret != 0) return -1;
+
+        *count = (int)g.gl_pathc;
+        *results = malloc(sizeof(char *) * (size_t)(*count));
+        if (!*results) { globfree(&g); return -1; }
+
+        for (int i = 0; i < *count; i++) {
+            (*results)[i] = strdup(g.gl_pathv[i]);
+            if (!(*results)[i]) {
+                for (int j = 0; j < i; j++) free((*results)[j]);
+                free(*results); globfree(&g); return -1;
+            }
+        }
+
+        globfree(&g);
+        return 0;
+    }
+#endif
         progress->last_update_time = current_time;
 
         double percentage = (double)ulnow / ultotal * 100.0;
@@ -68,12 +292,12 @@ int progress_callback(void *clientp, curl_off_t dltotal, curl_off_t dlnow, curl_
         spinner_frame = (spinner_frame + 1) % (sizeof(spinner_chars)/sizeof(char*));
 
         // Clear the entire line and print the progress bar
-        printf("\r\033[K"); 
+        fprintf(stderr, "\r\033[K"); 
         
-        print_colored(spinner_chars[spinner_frame], COLOR_YELLOW);
-        printf(" Uploading ");
-        print_colored(progress->filename, COLOR_BOLD);
-        printf("... %.1f%%", percentage);
+        fprintf(stderr, "%s%s%s", COLOR_YELLOW, spinner_chars[spinner_frame], COLOR_RESET);
+        fprintf(stderr, " Uploading ");
+        fprintf(stderr, "%s%s%s", COLOR_BOLD, progress->filename, COLOR_RESET);
+        fprintf(stderr, "... %.1f%%", percentage);
 
         // Calculate and display ETA based on average speed
         double elapsed_s = (current_time.tv_sec - progress->start_time.tv_sec) + 
@@ -84,15 +308,15 @@ int progress_callback(void *clientp, curl_off_t dltotal, curl_off_t dlnow, curl_
             double remaining_bytes = ultotal - ulnow;
             int eta_seconds = (int)(remaining_bytes / speed);
 
-            printf(" (ETA: ");
+            fprintf(stderr, " (ETA: ");
             if (eta_seconds < 60) {
-                printf("%ds", eta_seconds);
+                fprintf(stderr, "%ds", eta_seconds);
             } else {
-                printf("%dm %ds", eta_seconds / 60, eta_seconds % 60);
+                fprintf(stderr, "%dm %ds", eta_seconds / 60, eta_seconds % 60);
             }
-            printf(")");
+            fprintf(stderr, ")");
         }
-        fflush(stdout);
+        fflush(stderr);
     }
     
     return 0;
@@ -243,7 +467,7 @@ int cdrive_upload(const char *source_path, const char *target_folder) {
         if (attempt == 0) stop_spinner(&setup_spinner);
 
         res = curl_easy_perform(curl);
-        printf("\r\033[K"); // Clear progress line
+        fprintf(stderr, "\r\033[K"); // Clear progress line
 
         curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
 

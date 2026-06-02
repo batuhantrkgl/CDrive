@@ -112,28 +112,20 @@ int show_interactive_menu(const char *question, const char **options, int num_op
         fflush(stdout);
 
         enable_raw_mode();
-        char c;
-        if (read(STDIN_FILENO, &c, 1) != 1) {
+        int ch = cdrive_getch();
+        if (ch < 0) {
             disable_raw_mode();
             continue;
         }
-        fprintf(stderr, "read: %d\n", c);
 
-        if (c == '\033') {
-            fprintf(stderr, "got escape\n");
+        if (ch == '\033') {
             char seq[2];
-            if (read(STDIN_FILENO, &seq[0], 1) != 1) {
-                fprintf(stderr, "timeout on seq[0]\n");
-                disable_raw_mode();
-                continue;
-            }
-            fprintf(stderr, "seq[0]: %d\n", seq[0]);
-            if (read(STDIN_FILENO, &seq[1], 1) != 1) {
-                fprintf(stderr, "timeout on seq[1]\n");
-                disable_raw_mode();
-                continue;
-            }
-            fprintf(stderr, "seq[1]: %d\n", seq[1]);
+            int s0 = cdrive_getch();
+            if (s0 < 0) { disable_raw_mode(); continue; }
+            seq[0] = (char)s0;
+            int s1 = cdrive_getch();
+            if (s1 < 0) { disable_raw_mode(); continue; }
+            seq[1] = (char)s1;
 
             if (seq[0] == '[') {
                 if (seq[1] == 'A') {
@@ -148,8 +140,23 @@ int show_interactive_menu(const char *question, const char **options, int num_op
                     }
                 }
             }
+#ifdef _WIN32
+        } else if (ch == 0xE0 || ch == 0x00) {
+            int seq = cdrive_getch();
+            if (seq == 0x48) {
+                selected = (selected > 0) ? selected - 1 : num_options - 1;
+                if (selected < start_index) {
+                    start_index = selected;
+                }
+            } else if (seq == 0x50) {
+                selected = (selected < num_options - 1) ? selected + 1 : 0;
+                if (selected >= start_index + display_window_size) {
+                    start_index = selected - display_window_size + 1;
+                }
+            }
+#endif
         } else {
-            switch (c) {
+            switch (ch) {
                 case 'k':
                 case 'K':
                     selected = (selected > 0) ? selected - 1 : num_options - 1;
@@ -393,11 +400,52 @@ size_t write_response_callback(char *contents, size_t size, size_t nmemb, void *
     return total_size;
 }
 
+int cdrive_api_get(const char *url, APIResponse *response) {
+    for (int attempt = 0; attempt < 2; attempt++) {
+        if (attempt > 0) {
+            if (refresh_access_token(&g_tokens) != 0 || save_tokens(&g_tokens) != 0) break;
+        }
+
+        CURL *curl = curl_easy_init();
+        if (!curl) {
+            if (response->data) free(response->data);
+            return -1;
+        }
+
+        char auth_header[MAX_HEADER_SIZE];
+        snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", g_tokens.access_token);
+        struct curl_slist *headers = curl_slist_append(NULL, auth_header);
+
+        curl_easy_setopt(curl, CURLOPT_URL, url);
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_response_callback);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, response);
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+
+        CURLcode res = curl_easy_perform(curl);
+        long http_code = 0;
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+
+        curl_slist_free_all(headers);
+        curl_easy_cleanup(curl);
+
+        if (res == CURLE_OK && http_code == 200) return 0;
+        if (res != CURLE_OK || (http_code != 401 && http_code != 403)) break;
+
+        // Auth error — clean response data for retry
+        if (response->data) { free(response->data); response->data = NULL; response->size = 0; }
+    }
+
+    if (response->data) { free(response->data); response->data = NULL; }
+    return -1;
+}
+
 int start_local_server(char *auth_code, const char *auth_url, int open_browser) {
-    int server_fd, new_socket;
+    cdrive_socket_t server_fd, new_socket;
     struct sockaddr_in address;
     int opt = 1;
-    int addrlen = sizeof(address);
+    socklen_t addrlen = sizeof(address);
     char buffer[4096] = {0};
     
     const char *response_html =
@@ -415,7 +463,7 @@ int start_local_server(char *auth_code, const char *auth_url, int open_browser) 
         "</body></html>";
     
     // Create socket
-    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
+    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == CDRIVE_INVALID_SOCKET) {
         perror("socket failed");
         return -1;
     }
@@ -427,7 +475,7 @@ int start_local_server(char *auth_code, const char *auth_url, int open_browser) 
     if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
 #endif
         perror("setsockopt");
-        close(server_fd);
+        cdrive_socket_close(server_fd);
         return -1;
     }
     
@@ -438,14 +486,14 @@ int start_local_server(char *auth_code, const char *auth_url, int open_browser) 
     // Bind socket
     if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
         perror("bind failed");
-        close(server_fd);
+        cdrive_socket_close(server_fd);
         return -1;
     }
     
     // Listen for connections
     if (listen(server_fd, 3) < 0) {
         perror("listen");
-        close(server_fd);
+        cdrive_socket_close(server_fd);
         return -1;
     }
     
@@ -483,20 +531,20 @@ int start_local_server(char *auth_code, const char *auth_url, int open_browser) 
     }
     
     // Accept connection
-    if ((new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen)) < 0) {
+    if ((new_socket = accept(server_fd, (struct sockaddr *)&address, &addrlen)) == CDRIVE_INVALID_SOCKET) {
         stop_spinner(&spinner);
         perror("accept");
-        close(server_fd);
+        cdrive_socket_close(server_fd);
         return -1;
     }
     
     stop_spinner(&spinner);
     
     // Read request
-    read(new_socket, buffer, 4096);
+    cdrive_socket_read(new_socket, buffer, (int)sizeof(buffer));
     
     // Send response
-    send(new_socket, response_html, strlen(response_html), 0);
+    cdrive_socket_write(new_socket, response_html, (int)strlen(response_html));
     
     // Parse authorization code from request
     char *code_start = strstr(buffer, "code=");
@@ -508,11 +556,18 @@ int start_local_server(char *auth_code, const char *auth_url, int open_browser) 
             size_t code_length = code_end - code_start;
             strncpy(auth_code, code_start, code_length);
             auth_code[code_length] = '\0';
+        } else {
+            // No delimiter, rest of string is the code
+            size_t remaining = strlen(code_start);
+            if (remaining < 256) {
+                strncpy(auth_code, code_start, remaining);
+                auth_code[remaining] = '\0';
+            }
         }
     }
     
-    close(new_socket);
-    close(server_fd);
+    cdrive_socket_close(new_socket);
+    cdrive_socket_close(server_fd);
     
     return strlen(auth_code) > 0 ? 0 : -1;
 }
@@ -850,9 +905,31 @@ int cdrive_auth_login(int headless) {
             close(pipefd[1]);
             exit(result);
         } else if (server_pid > 0) {
-            // Parent process - wait a moment for server to start, then open browser
+            // Parent process - wait for server to start, then open browser
             close(pipefd[1]); // Close write end in parent
-            sleep(1); // Give server time to start
+
+            // Poll until the local server is accepting connections
+            int server_ready = 0;
+            for (int retry = 0; retry < 100; retry++) {
+                cdrive_socket_t test_fd = socket(AF_INET, SOCK_STREAM, 0);
+                if (test_fd != CDRIVE_INVALID_SOCKET) {
+                    struct sockaddr_in test_addr;
+                    test_addr.sin_family = AF_INET;
+                    test_addr.sin_addr.s_addr = htonl(0x7F000001);
+                    test_addr.sin_port = htons(8080);
+                    if (connect(test_fd, (struct sockaddr*)&test_addr, sizeof(test_addr)) == 0) {
+                        cdrive_socket_close(test_fd);
+                        server_ready = 1;
+                        break;
+                    }
+                    cdrive_socket_close(test_fd);
+                }
+                cdrive_usleep(50000);
+            }
+
+            if (!server_ready) {
+                print_warning("Local server may not be ready yet, proceeding anyway...");
+            }
 
             // Open browser
             char open_cmd[MAX_CMD_SIZE];
@@ -870,9 +947,25 @@ int cdrive_auth_login(int headless) {
             LoadingSpinner auth_spinner = {0};
             start_spinner(&auth_spinner, "Waiting for authentication callback...");
 
-            // Wait for the child process to complete
+            // Wait for the child process to complete (with 5-minute timeout)
             int status;
-            waitpid(server_pid, &status, 0);
+            pid_t wait_result;
+            time_t wait_start = time(NULL);
+            while (1) {
+                wait_result = waitpid(server_pid, &status, WNOHANG);
+                if (wait_result == server_pid) break;
+                if (wait_result == -1) break;
+                if (difftime(time(NULL), wait_start) > 300.0) {
+                    kill(server_pid, SIGTERM);
+                    waitpid(server_pid, &status, 0);
+                    print_error("Authentication timed out after 5 minutes.");
+                    close(pipefd[0]);
+                    stop_spinner(&auth_spinner);
+                    cleanup_winsock();
+                    return -1;
+                }
+                sleep(1);
+            }
 
             stop_spinner(&auth_spinner);
 
@@ -1023,60 +1116,13 @@ int load_tokens(OAuthTokens *tokens) {
 }
 
 int get_user_info(char *user_name, size_t name_size) {
-    CURL *curl;
-    CURLcode res;
     APIResponse response = {0};
-    long http_code = 0;
 
-    for (int attempt = 0; attempt < 2; attempt++) {
-        if (attempt == 0) {
-            if (strlen(g_tokens.access_token) == 0) {
-                return -1; // No token to use
-            }
-        } else {
-            // Refresh token on second attempt
-            if (refresh_access_token(&g_tokens) != 0 || save_tokens(&g_tokens) != 0) {
-                break; // Failed to refresh, exit loop
-            }
-        }
-
-        curl = curl_easy_init();
-        if (!curl) return -1;
-
-        char auth_header[MAX_HEADER_SIZE];
-        snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", g_tokens.access_token);
-        struct curl_slist *headers = NULL;
-        headers = curl_slist_append(headers, auth_header);
-
-        curl_easy_setopt(curl, CURLOPT_URL, "https://www.googleapis.com/drive/v3/about?fields=user");
-        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_response_callback);
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
-
-        res = curl_easy_perform(curl);
-        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
-
-        curl_slist_free_all(headers);
-        curl_easy_cleanup(curl);
-
-        if (res == CURLE_OK && http_code == 200) {
-            break; // Success
-        }
-
-        if (res != CURLE_OK || (http_code != 401 && http_code != 403)) {
-            break; // Non-auth error
-        }
-
-        // Auth error, loop will retry after refresh
-        if (response.data) {
-            free(response.data);
-            response.data = NULL;
-            response.size = 0;
-        }
+    if (strlen(g_tokens.access_token) == 0) {
+        return -1;
     }
 
-    if (res != CURLE_OK || http_code != 200) {
-        if (response.data) free(response.data);
+    if (cdrive_api_get("https://www.googleapis.com/drive/v3/about?fields=user", &response) != 0) {
         return -1;
     }
 

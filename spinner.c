@@ -1,6 +1,5 @@
 #define _GNU_SOURCE
 #include "cdrive.h"
-#include <unistd.h>
 
 // Spinner characters - rotating braille pattern
 static const char *spinner_chars[] = {
@@ -17,7 +16,7 @@ void *spinner_thread(void *arg) {
         fflush(stdout);
         
         i = (i + 1) % spinner_count;
-        usleep(100000); // 100ms delay for smooth animation
+        cdrive_usleep(100000); // 100ms delay for smooth animation
     }
     
     // Clear the spinner line when done
