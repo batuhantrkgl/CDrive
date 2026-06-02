@@ -56,6 +56,46 @@ int progress_callback(void *clientp, curl_off_t dltotal, curl_off_t dlnow, curl_
                                              (current_time.tv_nsec - progress->last_update_time.tv_nsec) / 1000000.0;
 
         if (elapsed_since_last_update_ms < 100.0 && ulnow < ultotal) {
+            return 0;
+        }
+
+        progress->last_update_time = current_time;
+
+        double percentage = (double)ulnow / ultotal * 100.0;
+
+        // Use the same spinner characters as the rest of the app for consistency
+        static const char* spinner_chars[] = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"};
+        static int spinner_frame = 0;
+        spinner_frame = (spinner_frame + 1) % (sizeof(spinner_chars)/sizeof(char*));
+
+        // Clear the entire line and print the progress bar
+        fprintf(stderr, "\r\033[K");
+
+        fprintf(stderr, "%s%s%s", COLOR_YELLOW, spinner_chars[spinner_frame], COLOR_RESET);
+        fprintf(stderr, " Uploading ");
+        fprintf(stderr, "%s%s%s", COLOR_BOLD, progress->filename, COLOR_RESET);
+        fprintf(stderr, "... %.1f%%", percentage);
+
+        // Calculate and display ETA based on average speed
+        double elapsed_s = (current_time.tv_sec - progress->start_time.tv_sec) +
+                           (current_time.tv_nsec - progress->start_time.tv_nsec) / 1e9;
+
+        if (elapsed_s > 0.5 && ulnow > 0) {
+            double speed = (double)ulnow / elapsed_s; // Average speed in bytes/sec
+            double remaining_bytes = ultotal - ulnow;
+            int eta_seconds = (int)(remaining_bytes / speed);
+
+            fprintf(stderr, " (ETA: ");
+            if (eta_seconds < 60) {
+                fprintf(stderr, "%ds", eta_seconds);
+            } else {
+                fprintf(stderr, "%dm %ds", eta_seconds / 60, eta_seconds % 60);
+            }
+            fprintf(stderr, ")");
+        }
+        fflush(stderr);
+    }
+
     return 0;
 }
 
@@ -282,45 +322,6 @@ int cdrive_share(const char *file_id, const char *email, const char *role) {
         return 0;
     }
 #endif
-        progress->last_update_time = current_time;
-
-        double percentage = (double)ulnow / ultotal * 100.0;
-        
-        // Use the same spinner characters as the rest of the app for consistency
-        static const char* spinner_chars[] = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"};
-        static int spinner_frame = 0;
-        spinner_frame = (spinner_frame + 1) % (sizeof(spinner_chars)/sizeof(char*));
-
-        // Clear the entire line and print the progress bar
-        fprintf(stderr, "\r\033[K"); 
-        
-        fprintf(stderr, "%s%s%s", COLOR_YELLOW, spinner_chars[spinner_frame], COLOR_RESET);
-        fprintf(stderr, " Uploading ");
-        fprintf(stderr, "%s%s%s", COLOR_BOLD, progress->filename, COLOR_RESET);
-        fprintf(stderr, "... %.1f%%", percentage);
-
-        // Calculate and display ETA based on average speed
-        double elapsed_s = (current_time.tv_sec - progress->start_time.tv_sec) + 
-                           (current_time.tv_nsec - progress->start_time.tv_nsec) / 1e9;
-        
-        if (elapsed_s > 0.5 && ulnow > 0) {
-            double speed = (double)ulnow / elapsed_s; // Average speed in bytes/sec
-            double remaining_bytes = ultotal - ulnow;
-            int eta_seconds = (int)(remaining_bytes / speed);
-
-            fprintf(stderr, " (ETA: ");
-            if (eta_seconds < 60) {
-                fprintf(stderr, "%ds", eta_seconds);
-            } else {
-                fprintf(stderr, "%dm %ds", eta_seconds / 60, eta_seconds % 60);
-            }
-            fprintf(stderr, ")");
-        }
-        fflush(stderr);
-    }
-    
-    return 0;
-}
 
 int cdrive_upload(const char *source_path, const char *target_folder) {
     CURL *curl;

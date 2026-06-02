@@ -1,16 +1,56 @@
-# .buildkite/pipeline.yml
+secrets:
+  - GH_TOKEN
 
 steps:
+  - label: ":information_source: Version Info"
+    key: "version"
+    plugins:
+      - docker#v5.12.0:
+          image: "alpine:3.20"
+          workdir: "/build"
+          environment:
+            - BUILDKITE_TAG
+            - BUILDKITE_COMMIT
+            - BUILDKITE_BRANCH
+            - BUILDKITE_PULL_REQUEST
+            - BUILDKITE_REPO
+          propagate-uid-gid: false
+          mount-buildkite-agent: true
+    command: |
+      apk add --no-cache git
+
+      VERSION=$$(grep 'CDRIVE_VERSION' cdrive.h | head -1 | cut -d'"' -f2)
+      SHORT_SHA=$$(git rev-parse --short HEAD 2>/dev/null || echo "$${BUILDKITE_COMMIT:0:7}")
+
+      if [[ -n "$${BUILDKITE_TAG}" ]] && [[ "$${BUILDKITE_TAG}" =~ ^v ]]; then
+        VERSION="$${BUILDKITE_TAG}"
+        IS_TAG="true"
+      else
+        VERSION="v$${VERSION}-beta.$${SHORT_SHA}"
+        IS_TAG="false"
+      fi
+
+      if echo "$${VERSION}" | grep -qE "beta|alpha|rc" 2>/dev/null; then
+        IS_BETA="true"
+      else
+        IS_BETA="false"
+      fi
+
+      buildkite-agent meta-data set "release-version" "$${VERSION}"
+      buildkite-agent meta-data set "is-tag" "$${IS_TAG}"
+      buildkite-agent meta-data set "is-beta" "$${IS_BETA}"
+
+      echo "Version: $${VERSION}  Is tag: $${IS_TAG}  Is beta: $${IS_BETA}"
+
+  - wait
 
   - label: ":linux: Build linux-x86_64"
     key: build-linux-x86_64
-    agents:
-      queue: default
     plugins:
-      - docker#v5.11.0:
-          image: ubuntu:22.04
-          propagate-environment: true
-          shell: ["/bin/bash", "-e", "-c"]
+      - docker#v5.12.0:
+          image: "ubuntu:22.04"
+          workdir: "/build"
+          propagate-uid-gid: false
           mount-buildkite-agent: true
     command: |
       set -euo pipefail
@@ -22,20 +62,17 @@ steps:
       make clean
       make
 
-      mkdir -p dist
-      cp out/dist/cdrive dist/
-      tar -czf cdrive-linux-x86_64.tar.gz -C dist cdrive
-      buildkite-agent artifact upload cdrive-linux-x86_64.tar.gz
+      mkdir -p artifacts
+      cp out/dist/cdrive artifacts/cdrive-linux-x86_64
+      buildkite-agent artifact upload "artifacts/cdrive-linux-x86_64"
 
   - label: ":linux: Build linux-i386"
     key: build-linux-i386
-    agents:
-      queue: default
     plugins:
-      - docker#v5.11.0:
-          image: ubuntu:22.04
-          propagate-environment: true
-          shell: ["/bin/bash", "-e", "-c"]
+      - docker#v5.12.0:
+          image: "ubuntu:22.04"
+          workdir: "/build"
+          propagate-uid-gid: false
           mount-buildkite-agent: true
     command: |
       set -euo pipefail
@@ -47,10 +84,7 @@ steps:
       dpkg --add-architecture i386
       apt-get update -q
       apt-get install -y \
-        gcc-multilib \
-        libc6-dev-i386 \
-        linux-libc-dev:i386 \
-        libjson-c-dev:i386
+        gcc-multilib libc6-dev-i386 linux-libc-dev:i386 libjson-c-dev:i386
       apt-get install -y -o Dpkg::Options::="--force-overwrite" libcurl4-openssl-dev:i386
 
       make clean
@@ -60,25 +94,21 @@ steps:
       LIBS="$(pkg-config --libs libcurl json-c)"
       make CC="gcc -m32" CFLAGS="$CFLAGS" LIBS="$LIBS"
 
-      mkdir -p dist
-      cp out/dist/cdrive dist/
-      tar -czf cdrive-linux-i386.tar.gz -C dist cdrive
-      buildkite-agent artifact upload cdrive-linux-i386.tar.gz
+      mkdir -p artifacts
+      cp out/dist/cdrive artifacts/cdrive-linux-i386
+      buildkite-agent artifact upload "artifacts/cdrive-linux-i386"
 
   - label: ":linux: Build linux-arm64"
     key: build-linux-arm64
-    agents:
-      queue: default
     plugins:
-      - docker#v5.11.0:
-          image: ubuntu:22.04
-          propagate-environment: true
-          shell: ["/bin/bash", "-e", "-c"]
+      - docker#v5.12.0:
+          image: "ubuntu:22.04"
+          workdir: "/build"
+          propagate-uid-gid: false
           mount-buildkite-agent: true
     command: |
       set -euo pipefail
       export DEBIAN_FRONTEND=noninteractive
-
       apt-get update -q
       apt-get install -y build-essential pkg-config curl git \
         libcurl4-openssl-dev libjson-c-dev
@@ -99,25 +129,21 @@ steps:
       LIBS="$(pkg-config --libs libcurl json-c)"
       make CC=aarch64-linux-gnu-gcc CFLAGS="$CFLAGS" LIBS="$LIBS"
 
-      mkdir -p dist
-      cp out/dist/cdrive dist/
-      tar -czf cdrive-linux-arm64.tar.gz -C dist cdrive
-      buildkite-agent artifact upload cdrive-linux-arm64.tar.gz
+      mkdir -p artifacts
+      cp out/dist/cdrive artifacts/cdrive-linux-arm64
+      buildkite-agent artifact upload "artifacts/cdrive-linux-arm64"
 
   - label: ":linux: Build linux-armhf"
     key: build-linux-armhf
-    agents:
-      queue: default
     plugins:
-      - docker#v5.11.0:
-          image: ubuntu:22.04
-          propagate-environment: true
-          shell: ["/bin/bash", "-e", "-c"]
+      - docker#v5.12.0:
+          image: "ubuntu:22.04"
+          workdir: "/build"
+          propagate-uid-gid: false
           mount-buildkite-agent: true
     command: |
       set -euo pipefail
       export DEBIAN_FRONTEND=noninteractive
-
       apt-get update -q
       apt-get install -y build-essential pkg-config curl git \
         libcurl4-openssl-dev libjson-c-dev
@@ -138,91 +164,220 @@ steps:
       LIBS="$(pkg-config --libs libcurl json-c)"
       make CC=arm-linux-gnueabihf-gcc CFLAGS="$CFLAGS" LIBS="$LIBS"
 
-      mkdir -p dist
-      cp out/dist/cdrive dist/
-      tar -czf cdrive-linux-armhf.tar.gz -C dist cdrive
-      buildkite-agent artifact upload cdrive-linux-armhf.tar.gz
+      mkdir -p artifacts
+      cp out/dist/cdrive artifacts/cdrive-linux-armhf
+      buildkite-agent artifact upload "artifacts/cdrive-linux-armhf"
+
+  - label: ":windows: Build windows-x86_64"
+    key: build-windows-x86_64
+    plugins:
+      - docker#v5.12.0:
+          image: "ubuntu:22.04"
+          workdir: "/build"
+          environment:
+            - GH_TOKEN
+          propagate-uid-gid: false
+          mount-buildkite-agent: true
+    command: |
+      set -euo pipefail
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update -q
+      apt-get install -y build-essential pkg-config curl git \
+        gcc-mingw-w64-x86-64 mingw-w64-tools
+
+      make clean
+      make windows-x86_64
+
+      mkdir -p artifacts
+      cp out/dist/cdrive-windows-x86_64.exe artifacts/cdrive-windows-x86_64.exe
+      buildkite-agent artifact upload "artifacts/cdrive-windows-x86_64.exe"
+
+  - label: ":windows: Build windows-i386"
+    key: build-windows-i386
+    plugins:
+      - docker#v5.12.0:
+          image: "ubuntu:22.04"
+          workdir: "/build"
+          environment:
+            - GH_TOKEN
+          propagate-uid-gid: false
+          mount-buildkite-agent: true
+    command: |
+      set -euo pipefail
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update -q
+      apt-get install -y build-essential pkg-config curl git \
+        gcc-mingw-w64-i686 mingw-w64-tools
+
+      make clean
+      make windows-i386
+
+      mkdir -p artifacts
+      cp out/dist/cdrive-windows-i386.exe artifacts/cdrive-windows-i386.exe
+      buildkite-agent artifact upload "artifacts/cdrive-windows-i386.exe"
+
+  - label: ":mac: Build darwin-x86_64"
+    key: build-darwin-x86_64
+    soft_fail: true
+    plugins:
+      - docker#v5.12.0:
+          image: "ubuntu:22.04"
+          workdir: "/build"
+          environment:
+            - GH_TOKEN
+          propagate-uid-gid: false
+          mount-buildkite-agent: true
+    command: |
+      set -euo pipefail
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update -q
+      apt-get install -y build-essential pkg-config curl git cmake clang \
+        libxml2-dev libssl-dev libz-dev
+
+      if [[ ! -d "/osxcross" ]]; then
+        git clone --depth=1 https://github.com/tpoechtrager/osxcross.git /osxcross
+        echo "WARNING: OSXCross requires an Apple SDK (MacOSX14.sdk.tar.xz)."
+        echo "Place it in /osxcross/tarballs/ and run /osxcross/build.sh"
+        echo "Skipping macOS build."
+        mkdir -p artifacts
+        echo "not-built" > artifacts/cdrive-darwin-x86_64
+        buildkite-agent artifact upload "artifacts/cdrive-darwin-x86_64"
+        exit 0
+      fi
+
+      export PATH="/osxcross/target/bin:$PATH"
+      export CC=o64-clang
+      export PKG_CONFIG=/bin/false
+
+      CFLAGS="-I/osxcross/target/SDK/MacOSX14.sdk/usr/include"
+      LIBS="-lcurl -ljson-c -lm -lpthread"
+
+      make clean
+      make CC="$CC" CFLAGS="$CFLAGS" LIBS="$LIBS"
+
+      mkdir -p artifacts
+      cp out/dist/cdrive artifacts/cdrive-darwin-x86_64
+      buildkite-agent artifact upload "artifacts/cdrive-darwin-x86_64"
+
+  - label: ":mac: Build darwin-arm64"
+    key: build-darwin-arm64
+    soft_fail: true
+    plugins:
+      - docker#v5.12.0:
+          image: "ubuntu:22.04"
+          workdir: "/build"
+          environment:
+            - GH_TOKEN
+          propagate-uid-gid: false
+          mount-buildkite-agent: true
+    command: |
+      set -euo pipefail
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update -q
+      apt-get install -y build-essential pkg-config curl git cmake clang \
+        libxml2-dev libssl-dev libz-dev
+
+      if [[ ! -d "/osxcross" ]]; then
+        git clone --depth=1 https://github.com/tpoechtrager/osxcross.git /osxcross
+        echo "WARNING: OSXCross requires an Apple SDK (MacOSX14.sdk.tar.xz)."
+        echo "Place it in /osxcross/tarballs/ and run /osxcross/build.sh"
+        echo "Skipping macOS ARM64 build."
+        mkdir -p artifacts
+        echo "not-built" > artifacts/cdrive-darwin-arm64
+        buildkite-agent artifact upload "artifacts/cdrive-darwin-arm64"
+        exit 0
+      fi
+
+      export PATH="/osxcross/target/bin:$PATH"
+      export CC=oa64-clang
+      export PKG_CONFIG=/bin/false
+
+      CFLAGS="-I/osxcross/target/SDK/MacOSX14.sdk/usr/include"
+      LIBS="-lcurl -ljson-c -lm -lpthread"
+
+      make clean
+      make CC="$CC" CFLAGS="$CFLAGS" LIBS="$LIBS"
+
+      mkdir -p artifacts
+      cp out/dist/cdrive artifacts/cdrive-darwin-arm64
+      buildkite-agent artifact upload "artifacts/cdrive-darwin-arm64"
 
   - wait: ~
     continue_on_failure: false
 
-  - label: ":package: Combine all artifacts"
-    key: combine-artifacts
-    agents:
-      queue: default
+  - label: ":rocket: Release"
+    key: "release"
+    depends_on:
+      - step: "version"
+        allow_failure: false
     plugins:
-      - docker#v5.11.0:
-          image: ubuntu:22.04
-          propagate-environment: true
-          shell: ["/bin/bash", "-e", "-c"]
+      - docker#v5.12.0:
+          image: "alpine:3.20"
+          workdir: "/build"
+          environment:
+            - BUILDKITE_TAG
+            - BUILDKITE_COMMIT
+            - BUILDKITE_BRANCH
+            - BUILDKITE_PULL_REQUEST
+            - BUILDKITE_REPO
+            - GH_TOKEN
+          propagate-uid-gid: false
           mount-buildkite-agent: true
     command: |
-      set -euo pipefail
-      export DEBIAN_FRONTEND=noninteractive
-      apt-get update -q
-      apt-get install -y ca-certificates
-
-      mkdir -p combined
-      buildkite-agent artifact download "cdrive-*.tar.gz" combined/
-
-      cd combined
-      tar -czf "cdrive-all-platforms.tar.gz" cdrive-*.tar.gz
-      sha256sum cdrive-*.tar.gz > checksums.txt
-      ls -la
-
-      buildkite-agent artifact upload "cdrive-all-platforms.tar.gz"
-      buildkite-agent artifact upload "checksums.txt"
-
-  - label: ":rocket: Create GitHub Release"
-    key: create-release
-    depends_on: combine-artifacts
-    branches: "main master"
-    agents:
-      queue: default
-    plugins:
-      - docker#v5.11.0:
-          image: ubuntu:22.04
-          propagate-environment: true
-          shell: ["/bin/bash", "-e", "-c"]
-          mount-buildkite-agent: true
-    command: |
-      set -euo pipefail
-
-      export GH_TOKEN=$(buildkite-agent secret get GH_TOKEN)
-      echo "GH_TOKEN length: ${#GH_TOKEN}"
-
-      export DEBIAN_FRONTEND=noninteractive
-      apt-get update -q
-      apt-get install -y ca-certificates curl git jq
-
-      curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-        | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
-      echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] \
-        https://cli.github.com/packages stable main" \
-        | tee /etc/apt/sources.list.d/github-cli.list
-      apt-get update -q
-      apt-get install -y gh
-
-      VERSION=$(grep 'CDRIVE_VERSION' cdrive.h | head -1 | cut -d'"' -f2)
-      if [[ -z "$VERSION" ]]; then
-        DATE=$(date +'%Y.%m.%d')
-        COMMIT_COUNT=$(git rev-list --count HEAD)
-        SHORT_SHA=$(git rev-parse --short HEAD)
-        VERSION="${DATE}.${COMMIT_COUNT}-${SHORT_SHA}"
+      if [[ "$${BUILDKITE_PULL_REQUEST}" != "false" ]]; then
+        echo "PR build -- skipping release"; exit 0
       fi
-      echo "Version: $VERSION"
+      if [[ "$${BUILDKITE_BRANCH}" != "master" ]] && [[ -z "$${BUILDKITE_TAG}" ]]; then
+        echo "Non-master, non-tag -- skipping release"; exit 0
+      fi
 
-      mkdir -p release
-      buildkite-agent artifact download "cdrive-*.tar.gz" release/
-      buildkite-agent artifact download "checksums.txt" release/
+      apk add --no-cache git github-cli curl
 
-      cd release
-      TAG_NAME="v${VERSION}"
-      gh release create "${TAG_NAME}" \
-        --title "CDrive v${VERSION}" \
-        --notes "Release v${VERSION} — linux-x86_64, linux-i386, linux-arm64, linux-armhf" \
-        --repo "${BUILDKITE_REPO}" \
-        *.tar.gz \
-        checksums.txt
+      VERSION=$$(buildkite-agent meta-data get release-version)
+      IS_TAG=$$(buildkite-agent meta-data get is-tag)
+      IS_BETA=$$(buildkite-agent meta-data get is-beta)
 
-      echo "Release: $(gh release view $TAG_NAME --json url --jq '.url')"
+      echo "--- Downloading all artifacts"
+      for step in build-linux-x86_64 build-linux-i386 build-linux-arm64 build-linux-armhf \
+                  build-windows-x86_64 build-windows-i386 \
+                  build-darwin-x86_64 build-darwin-arm64; do
+        buildkite-agent artifact download "artifacts/*" . --step "$${step}" 2>&1 || true
+      done
+
+      echo "--- Collecting release assets"
+      mkdir -p release-assets
+      find artifacts/ -type f -exec cp {} release-assets/ \; 2>/dev/null
+      ls -lh release-assets/
+
+      # Create checksums
+      cd release-assets
+      sha256sum * > checksums.txt
+      cd ..
+
+      git config user.email "ci@buildkite"
+      git config user.name "Buildkite CI"
+      git remote set-url origin "https://batuhantrkgl:$${GH_TOKEN}@github.com/batuhantrkgl/CDrive.git"
+
+      if [[ "$${IS_TAG}" == "true" ]]; then
+        echo "--- Creating GitHub Release $${VERSION}"
+        gh release create "$${VERSION}" \
+          --title "CDrive $${VERSION}" \
+          --notes "$$(git log -20 --oneline)" \
+          --prerelease="$${IS_BETA}" \
+          --draft=false \
+          release-assets/*
+      else
+        echo "--- Creating Nightly Release"
+        SHORT_SHA=$$(git rev-parse --short HEAD)
+        NIGHTLY_TAG="nightly-$${SHORT_SHA}"
+        git tag -f "$${NIGHTLY_TAG}"
+        git push origin "$${NIGHTLY_TAG}" 2>&1 || true
+
+        gh release create "$${NIGHTLY_TAG}" \
+          --title "CDrive $${NIGHTLY_TAG} ($${VERSION})" \
+          --notes "Nightly build from $${BUILDKITE_BRANCH}@$${BUILDKITE_COMMIT}" \
+          --prerelease=true \
+          --draft=false \
+          release-assets/* 2>&1 || \
+        echo "Release creation skipped"
+      fi
