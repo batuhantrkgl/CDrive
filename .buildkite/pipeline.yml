@@ -309,8 +309,8 @@ steps:
         --disable-ldap --disable-ldaps --disable-rtsp --disable-dict \
         --disable-telnet --disable-tftp --disable-pop3 --disable-imap \
         --disable-smtp --disable-gopher --disable-mqtt --disable-manual
-      make -j$(nproc)
-      make install
+      make -C lib -j$(nproc)
+      make -C lib install
 
       # Build cdrive for macOS x86_64
       cd /build
@@ -373,8 +373,8 @@ steps:
         --disable-ldap --disable-ldaps --disable-rtsp --disable-dict \
         --disable-telnet --disable-tftp --disable-pop3 --disable-imap \
         --disable-smtp --disable-gopher --disable-mqtt --disable-manual
-      make -j$(nproc)
-      make install
+      make -C lib -j$(nproc)
+      make -C lib install
 
       # Build cdrive for macOS arm64
       cd /build
