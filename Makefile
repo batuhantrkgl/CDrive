@@ -110,6 +110,8 @@ debug: all
 
 cross-all: $(addprefix cross-, $(TARGETS))
 
+$(TARGETS): %: cross-%
+
 # Generic rule for cross-compiling. It's inefficient as it recompiles all sources,
 # but centralizes the logic from the CI workflow.
 define cross_compile_rule
