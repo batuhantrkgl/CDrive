@@ -204,7 +204,7 @@ steps:
       cd /tmp/build-deps
       curl -sL https://curl.se/download/curl-8.12.1.tar.gz | tar xz
       cd curl-8.12.1
-      ./configure --host=x86_64-w64-mingw32 --prefix=/usr/x86_64-w64-mingw32 --enable-static --disable-shared --without-ssl --without-libssh2 --without-nghttp2 --disable-ldap --disable-ldaps --disable-rtsp --disable-dict --disable-telnet --disable-tftp --disable-pop3 --disable-imap --disable-smtp --disable-gopher --disable-mqtt --disable-manual
+      ./configure --host=x86_64-w64-mingw32 --prefix=/usr/x86_64-w64-mingw32 --enable-static --disable-shared --without-ssl --without-libssh2 --without-nghttp2 --without-libpsl --disable-ldap --disable-ldaps --disable-rtsp --disable-dict --disable-telnet --disable-tftp --disable-pop3 --disable-imap --disable-smtp --disable-gopher --disable-mqtt --disable-manual
       make -j$(nproc)
       make install
 
@@ -244,7 +244,7 @@ steps:
       cd /tmp/build-deps
       curl -sL https://curl.se/download/curl-8.12.1.tar.gz | tar xz
       cd curl-8.12.1
-      ./configure --host=i686-w64-mingw32 --prefix=/usr/i686-w64-mingw32 --enable-static --disable-shared --without-ssl --without-libssh2 --without-nghttp2 --disable-ldap --disable-ldaps --disable-rtsp --disable-dict --disable-telnet --disable-tftp --disable-pop3 --disable-imap --disable-smtp --disable-gopher --disable-mqtt --disable-manual
+      ./configure --host=i686-w64-mingw32 --prefix=/usr/i686-w64-mingw32 --enable-static --disable-shared --without-ssl --without-libssh2 --without-nghttp2 --without-libpsl --disable-ldap --disable-ldaps --disable-rtsp --disable-dict --disable-telnet --disable-tftp --disable-pop3 --disable-imap --disable-smtp --disable-gopher --disable-mqtt --disable-manual
       make -j$(nproc)
       make install
 
