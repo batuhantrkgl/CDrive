@@ -310,7 +310,10 @@ steps:
         --disable-telnet --disable-tftp --disable-pop3 --disable-imap \
         --disable-smtp --disable-gopher --disable-mqtt --disable-manual
       make -C lib -j$(nproc)
-      make -C lib install
+      # Copy .a directly to avoid Linux ranlib corrupting the macOS table of contents
+      cp lib/.libs/libcurl.a /opt/osxcross/target/lib/libcurl.a
+      mkdir -p /opt/osxcross/target/include/curl
+      cp include/curl/*.h /opt/osxcross/target/include/curl/
 
       # Build cdrive for macOS x86_64
       cd /build
@@ -377,7 +380,10 @@ steps:
         --disable-telnet --disable-tftp --disable-pop3 --disable-imap \
         --disable-smtp --disable-gopher --disable-mqtt --disable-manual
       make -C lib -j$(nproc)
-      make -C lib install
+      # Copy .a directly to avoid Linux ranlib corrupting the macOS table of contents
+      cp lib/.libs/libcurl.a /opt/osxcross/target/lib/libcurl.a
+      mkdir -p /opt/osxcross/target/include/curl
+      cp include/curl/*.h /opt/osxcross/target/include/curl/
 
       # Build cdrive for macOS arm64
       cd /build
