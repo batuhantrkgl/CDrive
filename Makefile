@@ -79,7 +79,7 @@ EXT_windows-i386 = .exe
 # Define platform-specific libraries for cross-compilation
 LIBS_windows = -lcurl -ljson-c -lws2_32 -lm -lpthread
 LIBS_linux = -lcurl -ljson-c -lm -lpthread
-LIBS_darwin = -Wl,-force_load,/opt/osxcross/target/lib/libcurl.a -Wl,-force_load,/opt/osxcross/target/lib/libjson-c.a -lm -lpthread
+LIBS_darwin = /opt/osxcross/target/lib/libcurl.a /opt/osxcross/target/lib/libjson-c.a -lm -lpthread
 
 # Default per-target CFLAGS and LDFLAGS for cross-compilation
 # These can be overridden via environment or make arguments
@@ -88,10 +88,10 @@ TARGET_CFLAGS_windows-i386 = -I/usr/i686-w64-mingw32/include -DCURL_STATICLIB -D
 TARGET_LDFLAGS_windows-x86_64 = -L/usr/x86_64-w64-mingw32/lib
 TARGET_LDFLAGS_windows-i386 = -L/usr/i686-w64-mingw32/lib
 
-TARGET_CFLAGS_darwin-x86_64 = -I/opt/osxcross/target/include -I/opt/osxcross/SDK/MacOSX12.3.sdk/usr/include -DCURL_STATICLIB -DJSON_C_STATICLIB
-TARGET_CFLAGS_darwin-arm64 = -I/opt/osxcross/target/include -I/opt/osxcross/SDK/MacOSX12.3.sdk/usr/include -DCURL_STATICLIB -DJSON_C_STATICLIB
-TARGET_LDFLAGS_darwin-x86_64 = -L/opt/osxcross/target/lib
-TARGET_LDFLAGS_darwin-arm64 = -L/opt/osxcross/target/lib
+TARGET_CFLAGS_darwin-x86_64 = -I/opt/osxcross/target/include -I/opt/osxcross/SDK/MacOSX12.3.sdk/usr/include -DCURL_STATICLIB -DJSON_C_STATICLIB -isysroot /opt/osxcross/SDK/MacOSX12.3.sdk -mmacosx-version-min=10.15
+TARGET_CFLAGS_darwin-arm64 = -I/opt/osxcross/target/include -I/opt/osxcross/SDK/MacOSX12.3.sdk/usr/include -DCURL_STATICLIB -DJSON_C_STATICLIB -isysroot /opt/osxcross/SDK/MacOSX12.3.sdk -mmacosx-version-min=11.0
+TARGET_LDFLAGS_darwin-x86_64 = -L/opt/osxcross/target/lib -isysroot /opt/osxcross/SDK/MacOSX12.3.sdk
+TARGET_LDFLAGS_darwin-arm64 = -L/opt/osxcross/target/lib -isysroot /opt/osxcross/SDK/MacOSX12.3.sdk
 
 
 # Object files
