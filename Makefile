@@ -213,6 +213,12 @@ test: $(DIST_DIR)/$(PROJECT_NAME)
 	@printf "$(BLUE)Testing $(BOLD)$(PROJECT_NAME)$(RESET)$(BLUE)...$(RESET)\n"
 	@$(DIST_DIR)/$(PROJECT_NAME) help >/dev/null && printf "$(GREEN)Test passed!$(RESET)\n" || printf "$(RED)Test failed!$(RESET)\n"
 
+# Build Source RPM for Fedora COPR
+srpm:
+	@mkdir -p $(OUT_DIR)/rpm
+	@$(MAKE) -f .copr/Makefile srpm outdir=$(OUT_DIR)/rpm spec=cdrive.spec
+	@printf "$(GREEN)SRPM generated in $(OUT_DIR)/rpm/$(RESET)\n"
+
 # Show build info
 info:
 	@printf "$(BOLD)$(CYAN)Project: $(WHITE)$(PROJECT_NAME) v$(VERSION)$(RESET)\n"
