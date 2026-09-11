@@ -46,8 +46,13 @@ DEBUG_CFLAGS = -Wall -Wextra -std=c99 -g -DDEBUG
 
 # Use pkg-config for host build flags
 PKG_LIBS = libcurl json-c
-HOST_CFLAGS = $(shell pkg-config --cflags $(PKG_LIBS) 2>/dev/null)
-HOST_LIBS = $(shell pkg-config --libs $(PKG_LIBS) 2>/dev/null) -lm -lpthread
+HOST_CFLAGS ?= $(shell pkg-config --cflags $(PKG_LIBS) 2>/dev/null)
+HOST_LIBS_PC := $(shell pkg-config --libs $(PKG_LIBS) 2>/dev/null)
+ifeq ($(strip $(HOST_LIBS_PC)),)
+HOST_LIBS ?= -lcurl -ljson-c -lm -lpthread
+else
+HOST_LIBS ?= $(HOST_LIBS_PC) -lm -lpthread
+endif
 
 # Target platforms for cross-compilation
 TARGETS = \
@@ -104,7 +109,7 @@ all: $(DIST_DIR)/$(PROJECT_NAME)
 $(DIST_DIR)/$(PROJECT_NAME): $(OBJECTS)
 	@mkdir -p $(DIST_DIR)
 	@printf "$(CYAN)Linking $(BOLD)$(PROJECT_NAME)$(RESET)$(CYAN) for $(YELLOW)$(HOST_TARGET)$(RESET)$(CYAN)...$(RESET)\n"
-	$(CC) $(OBJECTS) -o $@ $(HOST_LIBS)
+	$(CC) $(CFLAGS) $(OBJECTS) -o $@ $(LDFLAGS) $(HOST_LIBS)
 	@printf "$(GREEN)Build complete: $(BOLD)$@$(RESET)\n"
 
 # Compile source files
@@ -169,17 +174,18 @@ clean:
 	@rm -rf $(OUT_DIR)
 	@printf "$(GREEN)Clean complete!$(RESET)\n"
 
-# Install to system (requires sudo)
+PREFIX ?= /usr/local
+BINDIR ?= $(PREFIX)/bin
+
+# Install to system
 install: $(DIST_DIR)/$(PROJECT_NAME)
-	@printf "$(CYAN)Installing $(BOLD)$(PROJECT_NAME)$(RESET)$(CYAN) to /usr/local/bin...$(RESET)\n"
-	@sudo cp $(DIST_DIR)/$(PROJECT_NAME) /usr/local/bin/
-	@sudo chmod +x /usr/local/bin/$(PROJECT_NAME)
+	@mkdir -p $(DESTDIR)$(BINDIR)
+	install -m 755 $(DIST_DIR)/$(PROJECT_NAME) $(DESTDIR)$(BINDIR)/$(PROJECT_NAME)
 	@printf "$(GREEN)Installation complete! You can now run '$(BOLD)$(PROJECT_NAME)$(RESET)$(GREEN)' from anywhere.$(RESET)\n"
 
 # Uninstall from system
 uninstall:
-	@printf "$(YELLOW)Uninstalling $(BOLD)$(PROJECT_NAME)$(RESET)$(YELLOW)...$(RESET)\n"
-	@sudo rm -f /usr/local/bin/$(PROJECT_NAME)
+	rm -f $(DESTDIR)$(BINDIR)/$(PROJECT_NAME)
 	@printf "$(GREEN)Uninstallation complete!$(RESET)\n"
 
 # Check dependencies

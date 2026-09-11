@@ -1,0 +1,25 @@
+# Packit configuration for Fedora COPR integration
+# https://packit.dev/docs/configuration/
+
+specfile_path: cdrive.spec
+files_to_sync:
+  - cdrive.spec
+  - .packit.yaml
+
+upstream_package_name: cdrive
+downstream_package_name: cdrive
+
+jobs:
+  - job: copr_build
+    trigger: release
+    targets:
+      - fedora-all
+      - epel-9
+      - epel-10
+
+  - job: copr_build
+    trigger: commit
+    branch: master
+    targets:
+      - fedora-latest
+      - fedora-rawhide
