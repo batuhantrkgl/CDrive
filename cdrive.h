@@ -82,7 +82,7 @@
 #define OAUTH_TOKEN_URL "https://oauth2.googleapis.com/token"
 #define DRIVE_API_URL "https://www.googleapis.com/drive/v3/files"
 #define UPLOAD_API_URL "https://www.googleapis.com/upload/drive/v3/files"
-#define REDIRECT_URI "http://localhost:8080"
+#define REDIRECT_URI "http://localhost:8080/"
 #define SCOPE "https://www.googleapis.com/auth/drive"
 
 // Menu options
@@ -130,8 +130,8 @@ int cdrive_list_files(const char *folder_id);
 int cdrive_create_folder(const char *folder_name, const char *parent_id);
 
 // Version and update information
-#define CDRIVE_VERSION "1.0.2"
-#define CDRIVE_RELEASE_DATE "2025-08-11"
+#define CDRIVE_VERSION "1.0.3"
+#define CDRIVE_RELEASE_DATE "2026-09-11"
 #define GITHUB_REPO_URL "https://api.github.com/repos/batuhantrkgl/CDrive/releases/latest"
 #define GITHUB_RELEASES_URL "https://github.com/batuhantrkgl/CDrive/releases"
 

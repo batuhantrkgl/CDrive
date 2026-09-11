@@ -1,4 +1,5 @@
 #define _GNU_SOURCE
+#include <errno.h>
 #include "cdrive.h"
 
 // Platform-specific function definitions, moved from cdrive.h to be local to this file.
@@ -530,45 +531,52 @@ int start_local_server(char *auth_code, const char *auth_url, int open_browser) 
         start_spinner(&spinner, "Waiting for authentication callback...");
     }
     
-    // Accept connection
-    if ((new_socket = accept(server_fd, (struct sockaddr *)&address, &addrlen)) == CDRIVE_INVALID_SOCKET) {
-        stop_spinner(&spinner);
-        perror("accept");
-        cdrive_socket_close(server_fd);
-        return -1;
-    }
-    
-    stop_spinner(&spinner);
-    
-    // Read request
-    cdrive_socket_read(new_socket, buffer, (int)sizeof(buffer));
-    
-    // Send response
-    cdrive_socket_write(new_socket, response_html, (int)strlen(response_html));
-    
-    // Parse authorization code from request
-    char *code_start = strstr(buffer, "code=");
-    if (code_start) {
-        code_start += 5; // Skip "code="
-        char *code_end = strchr(code_start, '&');
-        if (!code_end) code_end = strchr(code_start, ' ');
-        if (code_end) {
-            size_t code_length = code_end - code_start;
-            strncpy(auth_code, code_start, code_length);
-            auth_code[code_length] = '\0';
-        } else {
-            // No delimiter, rest of string is the code
-            size_t remaining = strlen(code_start);
-            if (remaining < 256) {
-                strncpy(auth_code, code_start, remaining);
-                auth_code[remaining] = '\0';
+    // Accept connection loop
+    while (strlen(auth_code) == 0) {
+        addrlen = sizeof(address);
+        if ((new_socket = accept(server_fd, (struct sockaddr *)&address, &addrlen)) == CDRIVE_INVALID_SOCKET) {
+            if (errno == EINTR) continue;
+            perror("accept");
+            break;
+        }
+
+        memset(buffer, 0, sizeof(buffer));
+        cdrive_socket_read(new_socket, buffer, (int)sizeof(buffer) - 1);
+
+        // Parse authorization code from request
+        char *code_start = strstr(buffer, "code=");
+        if (code_start) {
+            code_start += 5; // Skip "code="
+            char *code_end = strchr(code_start, '&');
+            if (!code_end) code_end = strchr(code_start, ' ');
+            if (code_end) {
+                size_t code_length = code_end - code_start;
+                if (code_length < 256) {
+                    strncpy(auth_code, code_start, code_length);
+                    auth_code[code_length] = '\0';
+                }
+            } else {
+                size_t remaining = strlen(code_start);
+                if (remaining < 256) {
+                    strncpy(auth_code, code_start, remaining);
+                    auth_code[remaining] = '\0';
+                }
             }
+            // Send success response
+            cdrive_socket_write(new_socket, response_html, (int)strlen(response_html));
+            cdrive_socket_close(new_socket);
+            break;
+        } else {
+            // Not the OAuth callback (e.g. browser probe, favicon) - return 204 and keep listening
+            const char *noop_resp = "HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n";
+            cdrive_socket_write(new_socket, noop_resp, (int)strlen(noop_resp));
+            cdrive_socket_close(new_socket);
         }
     }
-    
-    cdrive_socket_close(new_socket);
+
+    stop_spinner(&spinner);
     cdrive_socket_close(server_fd);
-    
+
     return strlen(auth_code) > 0 ? 0 : -1;
 }
 
@@ -908,28 +916,8 @@ int cdrive_auth_login(int headless) {
             // Parent process - wait for server to start, then open browser
             close(pipefd[1]); // Close write end in parent
 
-            // Poll until the local server is accepting connections
-            int server_ready = 0;
-            for (int retry = 0; retry < 100; retry++) {
-                cdrive_socket_t test_fd = socket(AF_INET, SOCK_STREAM, 0);
-                if (test_fd != CDRIVE_INVALID_SOCKET) {
-                    struct sockaddr_in test_addr;
-                    test_addr.sin_family = AF_INET;
-                    test_addr.sin_addr.s_addr = htonl(0x7F000001);
-                    test_addr.sin_port = htons(8080);
-                    if (connect(test_fd, (struct sockaddr*)&test_addr, sizeof(test_addr)) == 0) {
-                        cdrive_socket_close(test_fd);
-                        server_ready = 1;
-                        break;
-                    }
-                    cdrive_socket_close(test_fd);
-                }
-                cdrive_usleep(50000);
-            }
-
-            if (!server_ready) {
-                print_warning("Local server may not be ready yet, proceeding anyway...");
-            }
+            // Give child process time to bind and listen on port 8080
+            cdrive_usleep(150000);
 
             // Open browser
             char open_cmd[MAX_CMD_SIZE];

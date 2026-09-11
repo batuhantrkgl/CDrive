@@ -1,8 +1,8 @@
 # CDrive
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.0.2-green)](https://github.com/batuhantrkgl/CDrive/releases)
-[![Release Date](https://img.shields.io/badge/release-2025--08--11-orange)](https://github.com/batuhantrkgl/CDrive/releases)
+[![Version](https://img.shields.io/badge/version-1.0.3-green)](https://github.com/batuhantrkgl/CDrive/releases)
+[![Release Date](https://img.shields.io/badge/release-2026--09--11-orange)](https://github.com/batuhantrkgl/CDrive/releases)
 [![Build](https://img.shields.io/badge/build-passing-brightgreen)](https://github.com/batuhantrkgl/CDrive/actions)
 [![Platform](https://img.shields.io/badge/platform-linux%20%7C%20windows%20%7C%20macos-lightgrey)](#cross-compilation)
 [![Language](https://img.shields.io/badge/language-C-555555)](https://en.wikipedia.org/wiki/C_(programming_language))
