@@ -24,6 +24,7 @@
     #include <windows.h>
     #include <winsock2.h>
     #include <ws2tcpip.h>
+    #include <shellapi.h>
     #include <conio.h>
     #include <direct.h>
     #include <io.h>

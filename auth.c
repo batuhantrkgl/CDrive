@@ -44,10 +44,6 @@
         }
     }
     
-    static int platform_getchar(void) {
-        return _getch();
-    }
-
     static int cdrive_getch_timeout(int timeout_ms) {
         int waited = 0;
         while (!_kbhit()) {

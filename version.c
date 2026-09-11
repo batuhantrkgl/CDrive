@@ -754,11 +754,7 @@ int download_and_install_update(const UpdateInfo *update_info, int auto_install)
     // Ensure extraction directory exists
     struct stat st;
     if (stat(extracted_file, &st) != 0) {
-#ifdef _WIN32
-        if (mkdir(extracted_file) != 0) {
-#else
         if (mkdir(extracted_file, 0755) != 0) {
-#endif
             print_error("Failed to create extraction directory");
             unlink(temp_file);
             remove_directory_recursive(extracted_file);
