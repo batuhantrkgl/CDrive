@@ -46,8 +46,8 @@ DEBUG_CFLAGS = -Wall -Wextra -std=c99 -g -DDEBUG
 
 # Use pkg-config for host build flags
 PKG_LIBS = libcurl json-c
-HOST_CFLAGS = $(shell pkg-config --cflags $(PKG_LIBS))
-HOST_LIBS = $(shell pkg-config --libs $(PKG_LIBS)) -lm -lpthread
+HOST_CFLAGS = $(shell pkg-config --cflags $(PKG_LIBS) 2>/dev/null)
+HOST_LIBS = $(shell pkg-config --libs $(PKG_LIBS) 2>/dev/null) -lm -lpthread
 
 # Target platforms for cross-compilation
 TARGETS = \

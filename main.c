@@ -1,5 +1,8 @@
 #define _GNU_SOURCE
 #include "cdrive.h"
+#ifndef _WIN32
+#include <signal.h>
+#endif
 
 // Global variables
 ClientCredentials g_client_creds;
@@ -8,6 +11,10 @@ char g_last_upload_link[MAX_URL_SIZE] = {0};
 int g_json_mode = 0;
 
 int main(int argc, char *argv[]) {
+#ifndef _WIN32
+    signal(SIGPIPE, SIG_IGN);
+#endif
+
     if (argc < 2) {
         print_usage();
         return 1;
@@ -19,6 +26,7 @@ int main(int argc, char *argv[]) {
             g_json_mode = 1;
             for (int j = i; j < argc - 1; j++) argv[j] = argv[j + 1];
             argc--;
+            argv[argc] = NULL;
             i--;
         }
     }
@@ -46,6 +54,7 @@ int main(int argc, char *argv[]) {
             print_colored("AUTH COMMANDS\n", COLOR_BOLD);
             printf("  login    Authenticate with Google Drive\n");
             printf("  status   Show authentication status\n");
+            printf("  logout   Log out and remove saved credentials\n");
             curl_global_cleanup();
             return 1;
         }
@@ -84,13 +93,19 @@ int main(int argc, char *argv[]) {
                 for (const char *p = g_tokens.access_token; *p; p++) {
                     hash = ((hash << 5) + hash) + (unsigned char)*p;
                 }
-                printf("Token fingerprint: %08lx\n", hash & 0xFFFFFFFF);
+                printf("Token fingerprint: %08lx\n", (unsigned long)(hash & 0xFFFFFFFFUL));
             } else {
                 print_error("Not authenticated. Run 'cdrive auth login' first.");
             }
+        } else if (strcmp(argv[2], "logout") == 0) {
+            if (cdrive_auth_logout() == 0) {
+                print_success("Successfully logged out. Saved tokens removed.");
+            } else {
+                print_error("Failed to log out or remove tokens.");
+            }
         } else {
             print_error("Unknown auth command");
-            printf("Run 'cdrive auth --help' for usage.\n");
+            printf("Run 'cdrive auth' for usage.\n");
             curl_global_cleanup();
             return 1;
         }
@@ -106,30 +121,67 @@ int main(int argc, char *argv[]) {
         }
 
         const char *target_folder = "root";
-        int file_arg = 2;
+        int last_file_arg = argc - 1;
 
-        // Detect if last arg is a folder ID (not a file path)
+        // If more than 1 argument after 'upload', check if the last argument is a target folder
+        // (i.e. does not exist as a local file or directory)
         if (argc > 3) {
-            target_folder = argv[argc - 1];
-            file_arg = 2;
+            if (access(argv[argc - 1], F_OK) != 0) {
+                target_folder = argv[argc - 1];
+                last_file_arg = argc - 2;
+            }
         }
 
-        // Expand glob pattern if wildcards present; otherwise treat as literal path
+        // Expand glob patterns if wildcards present; otherwise treat as literal paths
         char **expanded_files = NULL;
         int expanded_count = 0;
-        const char *source = argv[file_arg];
-        int has_wildcard = strchr(source, '*') || strchr(source, '?') || strchr(source, '[');
 
-        if (has_wildcard) {
-            if (cdrive_glob(source, &expanded_files, &expanded_count) != 0 || expanded_count == 0) {
-                print_error("No files match the given pattern.");
-                curl_global_cleanup();
-                return 1;
+        for (int arg_idx = 2; arg_idx <= last_file_arg; arg_idx++) {
+            const char *source = argv[arg_idx];
+            int has_wildcard = strchr(source, '*') || strchr(source, '?') || strchr(source, '[');
+
+            if (has_wildcard) {
+                char **glob_matches = NULL;
+                int glob_count = 0;
+                if (cdrive_glob(source, &glob_matches, &glob_count) == 0 && glob_count > 0) {
+                    char **tmp = realloc(expanded_files, (expanded_count + glob_count) * sizeof(char *));
+                    if (!tmp) {
+                        for (int m = 0; m < glob_count; m++) free(glob_matches[m]);
+                        free(glob_matches);
+                        for (int j = 0; j < expanded_count; j++) free(expanded_files[j]);
+                        free(expanded_files);
+                        print_error("Memory allocation failed during glob expansion");
+                        curl_global_cleanup();
+                        return 1;
+                    }
+                    expanded_files = tmp;
+                    for (int m = 0; m < glob_count; m++) {
+                        expanded_files[expanded_count++] = glob_matches[m];
+                    }
+                    free(glob_matches);
+                } else {
+                    print_warning("No files match pattern:");
+                    printf(" %s\n", source);
+                }
+            } else {
+                char **tmp = realloc(expanded_files, (expanded_count + 1) * sizeof(char *));
+                if (!tmp) {
+                    for (int j = 0; j < expanded_count; j++) free(expanded_files[j]);
+                    free(expanded_files);
+                    print_error("Memory allocation failed");
+                    curl_global_cleanup();
+                    return 1;
+                }
+                expanded_files = tmp;
+                expanded_files[expanded_count++] = strdup(source);
             }
-        } else {
-            expanded_files = malloc(sizeof(char *));
-            expanded_files[0] = strdup(source);
-            expanded_count = 1;
+        }
+
+        if (expanded_count == 0) {
+            print_error("No files found to upload.");
+            free(expanded_files);
+            curl_global_cleanup();
+            return 1;
         }
 
         int upload_failures = 0;
@@ -156,9 +208,14 @@ int main(int argc, char *argv[]) {
         }
     } else if (strcmp(argv[1], "list") == 0) {
         const char *folder_id = (argc > 2) ? argv[2] : "root";
-        print_colored("[>] ", COLOR_BLUE);
-        printf("Listing files in folder: %s\n", folder_id);
-        cdrive_list_files(folder_id);
+        if (!g_json_mode) {
+            print_colored("[>] ", COLOR_BLUE);
+            printf("Listing files in folder: %s\n", folder_id);
+        }
+        if (cdrive_list_files(folder_id) != 0) {
+            curl_global_cleanup();
+            return 1;
+        }
     } else if (strcmp(argv[1], "mkdir") == 0) {
         if (argc < 3) {
             print_colored("Usage: ", COLOR_BOLD);
@@ -188,11 +245,17 @@ int main(int argc, char *argv[]) {
 
         const char *query = argv[2];
         if (g_json_mode) {
-            printf("{\"command\":\"search\",\"query\":\"%s\",\"results\":", query);
+            json_object *q_obj = json_object_new_string(query);
+            printf("{\"command\":\"search\",\"query\":%s,\"results\":", json_object_to_json_string(q_obj));
+            json_object_put(q_obj);
         }
-        cdrive_search(query);
+        int search_res = cdrive_search(query);
         if (g_json_mode) {
             printf("}\n");
+        }
+        if (search_res != 0) {
+            curl_global_cleanup();
+            return 1;
         }
     } else if (strcmp(argv[1], "share") == 0) {
         if (argc < 4) {
@@ -245,9 +308,12 @@ int main(int argc, char *argv[]) {
             }
         } else {
             // Interactive download
-            cdrive_pull_interactive();
+            if (cdrive_pull_interactive() != 0) {
+                curl_global_cleanup();
+                return 1;
+            }
         }
-    } else if (strcmp(argv[1], "version") == 0 || strcmp(argv[1], "--version") == 0) {
+    } else if (strcmp(argv[1], "version") == 0 || strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-v") == 0) {
         print_version_with_update_check();
     } else if (strcmp(argv[1], "update") == 0) {
         if (argc < 3) {
@@ -302,6 +368,10 @@ int main(int argc, char *argv[]) {
                 printf("\n");
                 print_colored("[!] ", COLOR_RED);
                 printf("Repository not found or releases not available.\n");
+            } else if (update_result == -4) {
+                printf("\n");
+                print_colored("[*] ", COLOR_CYAN);
+                printf("Latest release is a pre-release. No new stable updates available.\n");
             } else {
                 printf("\n");
                 print_colored("[!] ", COLOR_YELLOW);
@@ -323,15 +393,13 @@ int main(int argc, char *argv[]) {
                     if (install_result == 0) {
                         printf("\n");
                         print_success("Update completed successfully!");
+                    } else if (install_result == 1) {
+                        printf("\n");
+                        print_warning("Update download succeeded, but installation requires manual steps");
                     } else {
-                        if (install_result == -1) {
-                            printf("\n");
-                            print_warning("Update download succeeded, but installation requires manual steps");
-                        } else {
-                            print_error("Update failed");
-                            curl_global_cleanup();
-                            return 1;
-                        }
+                        print_error("Update failed");
+                        curl_global_cleanup();
+                        return 1;
                     }
                 } else {
                     printf("\n");
@@ -381,7 +449,7 @@ int main(int argc, char *argv[]) {
             curl_global_cleanup();
             return 1;
         }
-    } else if (strcmp(argv[1], "help") == 0 || strcmp(argv[1], "--help") == 0) {
+    } else if (strcmp(argv[1], "help") == 0 || strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0) {
         print_usage();
     } else {
         print_error("Unknown command");

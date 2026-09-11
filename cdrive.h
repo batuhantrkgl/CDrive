@@ -45,6 +45,10 @@
     #include <sys/wait.h> // For waitpid
     #include <sys/socket.h> // For socket functions
     #include <netinet/in.h> // For sockaddr_in
+    #include <fcntl.h>
+#ifdef __APPLE__
+    #include <mach-o/dyld.h>
+#endif
 
     #define PATH_SEP "/"
     #define HOME_ENV "HOME"
@@ -52,8 +56,8 @@
 
 // Constants
 #define MAX_URL_SIZE 2048
-#define MAX_TOKEN_SIZE 1024
-#define MAX_HEADER_SIZE (MAX_TOKEN_SIZE + 100)
+#define MAX_TOKEN_SIZE 4096
+#define MAX_HEADER_SIZE (MAX_TOKEN_SIZE + 128)
 #define MAX_CMD_SIZE (MAX_URL_SIZE * 2 + 100)
 #define MAX_PATH_SIZE 512
 #define MAX_RESPONSE_SIZE 8192
@@ -106,7 +110,7 @@ typedef struct {
 } OAuthTokens;
 
 typedef struct {
-    char client_id[256];
+    char client_id[512];
     char client_secret[256];
 } ClientCredentials;
 
@@ -125,6 +129,7 @@ extern int g_json_mode;
 
 // Function declarations
 int cdrive_auth_login(int headless);
+int cdrive_auth_logout(void);
 int cdrive_upload(const char *source_path, const char *target_folder);
 int cdrive_list_files(const char *folder_id);
 int cdrive_create_folder(const char *folder_name, const char *parent_id);
@@ -150,7 +155,7 @@ int load_tokens(OAuthTokens *tokens);
 int load_client_credentials(ClientCredentials *creds);
 int refresh_access_token(OAuthTokens *tokens);
 int get_user_info(char *user_name, size_t name_size);
-char *get_file_mime_type(const char *filename);
+const char *get_file_mime_type(const char *filename);
 size_t write_response_callback(char *contents, size_t size, size_t nmemb, void *userp);
 int cdrive_api_get(const char *url, APIResponse *response);
 void print_usage(void);
@@ -160,8 +165,10 @@ int check_for_updates(UpdateInfo *update_info);
 int force_check_for_updates(UpdateInfo *update_info);
 int download_and_install_update(const UpdateInfo *update_info, int auto_install);
 int compare_versions(const char *current, const char *latest);
-int start_local_server(char *auth_code, const char *auth_url, int open_browser);
+int start_local_server(char *auth_code, size_t max_code_len, const char *auth_url, int open_browser);
 char *url_encode(const char *str);
+char *url_decode(const char *str);
+char *escape_drive_query(const char *str);
 
 // Search and share commands
 int cdrive_search(const char *query);
@@ -180,7 +187,7 @@ void print_warning(const char *message);
 
 // Loading spinner functions
 typedef struct {
-    int active;
+    volatile int active;
     pthread_t thread;
     char message[256];
 } LoadingSpinner;

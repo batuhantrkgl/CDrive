@@ -42,16 +42,18 @@ static int save_update_cache(const UpdateInfo *update_info) {
     
     time_t now = time(NULL);
     
-    fprintf(file, "{\n");
-    fprintf(file, "  \"timestamp\": %lld,\n", (long long)now);
-    fprintf(file, "  \"version\": \"%s\",\n", update_info->version);
-    fprintf(file, "  \"release_date\": \"%s\",\n", update_info->release_date);
-    fprintf(file, "  \"tag_name\": \"%s\",\n", update_info->tag_name);
-    fprintf(file, "  \"download_url\": \"%s\",\n", update_info->download_url);
-    fprintf(file, "  \"is_newer\": %s\n", update_info->is_newer ? "true" : "false");
-    fprintf(file, "}\n");
+    json_object *cache_obj = json_object_new_object();
+    json_object_object_add(cache_obj, "timestamp", json_object_new_int64((int64_t)now));
+    json_object_object_add(cache_obj, "version", json_object_new_string(update_info->version));
+    json_object_object_add(cache_obj, "release_date", json_object_new_string(update_info->release_date));
+    json_object_object_add(cache_obj, "tag_name", json_object_new_string(update_info->tag_name));
+    json_object_object_add(cache_obj, "download_url", json_object_new_string(update_info->download_url));
+    json_object_object_add(cache_obj, "is_newer", json_object_new_boolean(update_info->is_newer));
     
-    fclose(file);
+    fprintf(file, "%s\n", json_object_to_json_string_ext(cache_obj, JSON_C_TO_STRING_PRETTY));
+    json_object_put(cache_obj);
+    
+    if (fclose(file) != 0) return -1;
     return 0;
 }
 
@@ -97,21 +99,25 @@ static int load_update_cache(UpdateInfo *update_info) {
     if (json_object_object_get_ex(root, "version", &version_obj)) {
         strncpy(update_info->version, json_object_get_string(version_obj), 
                 sizeof(update_info->version) - 1);
+        update_info->version[sizeof(update_info->version) - 1] = '\0';
     }
     
     if (json_object_object_get_ex(root, "release_date", &release_date_obj)) {
         strncpy(update_info->release_date, json_object_get_string(release_date_obj), 
                 sizeof(update_info->release_date) - 1);
+        update_info->release_date[sizeof(update_info->release_date) - 1] = '\0';
     }
     
     if (json_object_object_get_ex(root, "tag_name", &tag_name_obj)) {
         strncpy(update_info->tag_name, json_object_get_string(tag_name_obj), 
                 sizeof(update_info->tag_name) - 1);
+        update_info->tag_name[sizeof(update_info->tag_name) - 1] = '\0';
     }
     
     if (json_object_object_get_ex(root, "download_url", &download_url_obj)) {
         strncpy(update_info->download_url, json_object_get_string(download_url_obj), 
                 sizeof(update_info->download_url) - 1);
+        update_info->download_url[sizeof(update_info->download_url) - 1] = '\0';
     }
     
     if (json_object_object_get_ex(root, "is_newer", &is_newer_obj)) {
@@ -135,6 +141,23 @@ void print_version(void) {
 }
 
 void print_version_with_update_check(void) {
+    if (g_json_mode) {
+        UpdateInfo update_info = {0};
+        if (load_update_cache(&update_info) != 0) {
+            check_for_updates(&update_info);
+        }
+        json_object *v_obj = json_object_new_object();
+        json_object_object_add(v_obj, "version", json_object_new_string(CDRIVE_VERSION));
+        json_object_object_add(v_obj, "release_date", json_object_new_string(CDRIVE_RELEASE_DATE));
+        if (update_info.version[0]) {
+            json_object_object_add(v_obj, "latest_version", json_object_new_string(update_info.version));
+            json_object_object_add(v_obj, "is_newer", json_object_new_boolean(update_info.is_newer));
+        }
+        printf("%s\n", json_object_to_json_string(v_obj));
+        json_object_put(v_obj);
+        return;
+    }
+
     // Print basic version info
     print_version();
     
@@ -237,6 +260,10 @@ void print_version_with_update_check(void) {
         print_colored("[*] ", COLOR_CYAN);
         printf("Check: ");
         print_colored(GITHUB_RELEASES_URL "\n", COLOR_BLUE);
+    } else if (update_result == -4) {
+        printf("\n");
+        print_colored("[*] ", COLOR_CYAN);
+        printf("Latest release is a pre-release. No new stable updates available.\n");
     } else {
         printf("\n");
         print_colored("[!] ", COLOR_YELLOW);
@@ -256,8 +283,12 @@ int compare_versions(const char *current, const char *latest) {
     int current_major = 0, current_minor = 0, current_patch = 0;
     int latest_major = 0, latest_minor = 0, latest_patch = 0;
     
-    // Parse current version with more flexible parsing
-    int current_parsed = sscanf(current, "%d.%d.%d", &current_major, &current_minor, &current_patch);
+    // Parse current version with more flexible parsing (remove 'v' prefix if present)
+    const char *curr_str = current;
+    if (current[0] == 'v' || current[0] == 'V') {
+        curr_str = current + 1;
+    }
+    int current_parsed = sscanf(curr_str, "%d.%d.%d", &current_major, &current_minor, &current_patch);
     if (current_parsed < 1) return 0; // Invalid format
     
     // Parse latest version (remove 'v' prefix if present)
@@ -379,7 +410,7 @@ int check_for_updates(UpdateInfo *update_info) {
         if (json_object_get_boolean(prerelease_obj)) {
             json_object_put(root);
             free(response.data);
-            return -3; // Skip prereleases
+            return -4; // Skip prereleases
         }
     }
     
@@ -452,15 +483,37 @@ int check_for_updates(UpdateInfo *update_info) {
                 const char *asset_name = json_object_get_string(name_obj);
                 
                 // Look for appropriate binary for current platform
-                if (platform_keyword && strstr(asset_name, platform_keyword)) {
+                int platform_matches = 0;
+                if (platform_keyword) {
+                    if (strstr(asset_name, platform_keyword)) {
+                        platform_matches = 1;
+                    }
+#ifdef _WIN32
+                    else if (strstr(asset_name, "win")) {
+                        platform_matches = 1;
+                    }
+#endif
+#ifdef __APPLE__
+                    else if (strstr(asset_name, "macos") || strstr(asset_name, "osx") || strstr(asset_name, "apple")) {
+                        platform_matches = 1;
+                    }
+#endif
+                }
+
+                if (platform_matches) {
                     // Check architecture if specified
-                    if (arch_keyword && strstr(asset_name, arch_keyword)) {
-                        const char *download_url = json_object_get_string(download_url_obj);
-                        strncpy(update_info->download_url, download_url, sizeof(update_info->download_url) - 1);
-                        update_info->download_url[sizeof(update_info->download_url) - 1] = '\0';
-                        break;
-                    } else if (!arch_keyword) {
-                        // If no specific arch requirement, take first platform match
+                    int arch_matches = 0;
+                    if (!arch_keyword) {
+                        arch_matches = 1;
+                    } else if (strstr(asset_name, arch_keyword)) {
+                        arch_matches = 1;
+                    } else if (strcmp(arch_keyword, "x86_64") == 0 && (strstr(asset_name, "amd64") || strstr(asset_name, "x64"))) {
+                        arch_matches = 1;
+                    } else if (strcmp(arch_keyword, "arm64") == 0 && strstr(asset_name, "aarch64")) {
+                        arch_matches = 1;
+                    }
+
+                    if (arch_matches) {
                         const char *download_url = json_object_get_string(download_url_obj);
                         strncpy(update_info->download_url, download_url, sizeof(update_info->download_url) - 1);
                         update_info->download_url[sizeof(update_info->download_url) - 1] = '\0';
@@ -515,8 +568,12 @@ static int download_progress_callback(void *clientp, curl_off_t dltotal, curl_of
         progress->last_update = now;
         
         double percent = (double)dlnow / (double)dltotal * 100.0;
+        if (percent > 100.0) percent = 100.0;
+        if (percent < 0.0) percent = 0.0;
         int bar_width = 40;
-        int pos = bar_width * (percent / 100.0);
+        int pos = (int)(bar_width * (percent / 100.0));
+        if (pos < 0) pos = 0;
+        if (pos > bar_width) pos = bar_width;
 
         printf("\r%s[", COLOR_GREEN);
         for (int i = 0; i < bar_width; ++i) {
@@ -535,6 +592,21 @@ static int download_progress_callback(void *clientp, curl_off_t dltotal, curl_of
     return 0;
 }
 
+static void remove_directory_recursive(const char *path) {
+    if (!path || !*path || strchr(path, '"') || strchr(path, '\'') || strchr(path, ';') || strchr(path, '&') || strchr(path, '|')) {
+        return;
+    }
+    if (!strstr(path, "cdrive_")) return;
+
+    char cmd[2048];
+#ifdef _WIN32
+    snprintf(cmd, sizeof(cmd), "rmdir /s /q \"%s\" >nul 2>&1", path);
+#else
+    snprintf(cmd, sizeof(cmd), "rm -rf \"%s\"", path);
+#endif
+    system(cmd);
+}
+
 int download_and_install_update(const UpdateInfo *update_info, int auto_install) {
     if (!update_info->download_url[0]) {
         print_error("No download URL available for your platform");
@@ -543,13 +615,21 @@ int download_and_install_update(const UpdateInfo *update_info, int auto_install)
         print_colored(GITHUB_RELEASES_URL "\n", COLOR_BLUE);
         return -1;
     }
+
+    // Validate update version format to prevent command injection
+    for (const char *p = update_info->version; *p; p++) {
+        if (!((*p >= '0' && *p <= '9') || (*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') || *p == '.' || *p == '-' || *p == '_')) {
+            print_error("Invalid characters in update version tag");
+            return -1;
+        }
+    }
     
     printf("\n");
     print_colored("[*] ", COLOR_YELLOW);
     printf("Downloading cdrive %s...\n", update_info->version);
     
     // Create temporary file with better naming
-    char temp_file[1024];
+    char temp_file[2048];
     char temp_dir[256];
     char extracted_file[1024];
     
@@ -558,20 +638,31 @@ int download_and_install_update(const UpdateInfo *update_info, int auto_install)
     if (!env_temp) env_temp = getenv("TMP");
     if (!env_temp) env_temp = "C:\\Windows\\Temp";
     strncpy(temp_dir, env_temp, sizeof(temp_dir) - 1);
-    snprintf(temp_file, sizeof(temp_file), "%s\\cdrive_%s.tar.gz", temp_dir, update_info->version);
-    snprintf(extracted_file, sizeof(extracted_file), "%s\\cdrive_%s_extracted", temp_dir, update_info->version);
+    temp_dir[sizeof(temp_dir) - 1] = '\0';
+    snprintf(temp_file, sizeof(temp_file), "%s\\cdrive_%s_%u.tar.gz", temp_dir, update_info->version, (unsigned)GetCurrentProcessId());
+    snprintf(extracted_file, sizeof(extracted_file), "%s\\cdrive_%s_extracted_%u", temp_dir, update_info->version, (unsigned)GetCurrentProcessId());
 #else
     const char *env_temp = getenv("TMPDIR");
     if (!env_temp) env_temp = "/tmp";
     strncpy(temp_dir, env_temp, sizeof(temp_dir) - 1);
-    snprintf(temp_file, sizeof(temp_file), "%s/cdrive_%s.tar.gz", temp_dir, update_info->version);
-    snprintf(extracted_file, sizeof(extracted_file), "%s/cdrive_%s_extracted", temp_dir, update_info->version);
+    temp_dir[sizeof(temp_dir) - 1] = '\0';
+    char dir_template[1024];
+    snprintf(dir_template, sizeof(dir_template), "%s/cdrive_update_XXXXXX", temp_dir);
+    char *created_dir = mkdtemp(dir_template);
+    if (!created_dir) {
+        print_error("Failed to create secure temporary directory");
+        return -1;
+    }
+    strncpy(extracted_file, created_dir, sizeof(extracted_file) - 1);
+    extracted_file[sizeof(extracted_file) - 1] = '\0';
+    snprintf(temp_file, sizeof(temp_file), "%s/cdrive_%s.tar.gz", extracted_file, update_info->version);
 #endif
     
     // Download file with progress tracking
     CURL *curl = curl_easy_init();
     if (!curl) {
         print_error("Failed to initialize download");
+        remove_directory_recursive(extracted_file);
         return -1;
     }
     
@@ -580,6 +671,7 @@ int download_and_install_update(const UpdateInfo *update_info, int auto_install)
         print_error("Failed to create temporary file");
         printf("Target location: %s\n", temp_file);
         curl_easy_cleanup(curl);
+        remove_directory_recursive(extracted_file);
         return -1;
     }
     
@@ -627,6 +719,7 @@ int download_and_install_update(const UpdateInfo *update_info, int auto_install)
             printf("Network error: %s\n", curl_easy_strerror(res));
         }
         unlink(temp_file);
+        remove_directory_recursive(extracted_file);
         return -1;
     }
     
@@ -636,6 +729,7 @@ int download_and_install_update(const UpdateInfo *update_info, int auto_install)
         if (file_stat.st_size < 1024) { // Less than 1KB is suspicious
             print_error("Downloaded file is too small. Download may have failed.");
             unlink(temp_file);
+            remove_directory_recursive(extracted_file);
             return -1;
         }
         
@@ -647,6 +741,8 @@ int download_and_install_update(const UpdateInfo *update_info, int auto_install)
         }
     } else {
         print_error("Could not verify downloaded file");
+        unlink(temp_file);
+        remove_directory_recursive(extracted_file);
         return -1;
     }
     
@@ -655,11 +751,19 @@ int download_and_install_update(const UpdateInfo *update_info, int auto_install)
     print_colored("[*] ", COLOR_YELLOW);
     printf("Extracting archive...\n");
     
-    // Create extraction directory
-    if (mkdir(extracted_file, 0755) != 0) {
-        print_error("Failed to create extraction directory");
-        unlink(temp_file);
-        return -1;
+    // Ensure extraction directory exists
+    struct stat st;
+    if (stat(extracted_file, &st) != 0) {
+#ifdef _WIN32
+        if (mkdir(extracted_file) != 0) {
+#else
+        if (mkdir(extracted_file, 0755) != 0) {
+#endif
+            print_error("Failed to create extraction directory");
+            unlink(temp_file);
+            remove_directory_recursive(extracted_file);
+            return -1;
+        }
     }
     
     // Extract using tar command
@@ -671,13 +775,20 @@ int download_and_install_update(const UpdateInfo *update_info, int auto_install)
         print_error("Failed to extract archive");
         printf("Command: %s\n", extract_cmd);
         unlink(temp_file);
-        rmdir(extracted_file);
+        remove_directory_recursive(extracted_file);
         return -1;
     }
     
     // Find the extracted binary
     char binary_path[2048];
+#ifdef _WIN32
+    snprintf(binary_path, sizeof(binary_path), "%s\\cdrive.exe", extracted_file);
+    if (access(binary_path, F_OK) != 0) {
+        snprintf(binary_path, sizeof(binary_path), "%s\\cdrive", extracted_file);
+    }
+#else
     snprintf(binary_path, sizeof(binary_path), "%s/cdrive", extracted_file);
+#endif
     
     // Check if binary exists
     if (access(binary_path, F_OK) != 0) {
@@ -685,8 +796,7 @@ int download_and_install_update(const UpdateInfo *update_info, int auto_install)
         printf("Expected location: %s\n", binary_path);
         unlink(temp_file);
         // Clean up extraction directory
-        snprintf(extract_cmd, sizeof(extract_cmd), "rm -rf \"%s\"", extracted_file);
-        system(extract_cmd);
+        remove_directory_recursive(extracted_file);
         return -1;
     }
     
@@ -703,6 +813,16 @@ int download_and_install_update(const UpdateInfo *update_info, int auto_install)
         
 #ifdef _WIN32
         if (GetModuleFileName(NULL, current_exe, sizeof(current_exe)) > 0) {
+            found_exe = 1;
+        }
+#elif defined(__APPLE__)
+        uint32_t size = sizeof(current_exe);
+        if (_NSGetExecutablePath(current_exe, &size) == 0) {
+            char real_path[512];
+            if (realpath(current_exe, real_path)) {
+                strncpy(current_exe, real_path, sizeof(current_exe) - 1);
+                current_exe[sizeof(current_exe) - 1] = '\0';
+            }
             found_exe = 1;
         }
 #else
@@ -740,7 +860,11 @@ int download_and_install_update(const UpdateInfo *update_info, int auto_install)
                 char *dir_path = strdup(current_exe);
                 char *last_slash = strrchr(dir_path, '/');
                 if (last_slash) {
-                    *last_slash = '\0';
+                    if (last_slash == dir_path) {
+                        dir_path[1] = '\0';
+                    } else {
+                        *last_slash = '\0';
+                    }
                     if (access(dir_path, W_OK) == 0) {
                         has_permission = 1;
                     }
@@ -762,7 +886,7 @@ int download_and_install_update(const UpdateInfo *update_info, int auto_install)
             printf("  sudo mv \"%s\" \"%s\"\n", binary_path, current_exe);
             printf("  sudo chmod +x \"%s\"\n", current_exe);
 #endif
-            return -1; // Return error code for permission denied
+            return 1; // Return 1 indicating download/extraction succeeded but manual installation is required
         }
         
         // Create backup
@@ -773,17 +897,51 @@ int download_and_install_update(const UpdateInfo *update_info, int auto_install)
         int install_success = 0;
         
 #ifdef _WIN32
-        // Windows installation
-        if (CopyFile(current_exe, backup_file, FALSE) && 
+        // Windows installation: rename running exe first, then copy new binary
+        if (MoveFileEx(current_exe, backup_file, MOVEFILE_REPLACE_EXISTING) && 
             CopyFile(binary_path, current_exe, FALSE)) {
             install_success = 1;
+        } else {
+            // Rollback if CopyFile failed
+            MoveFileEx(backup_file, current_exe, MOVEFILE_REPLACE_EXISTING);
         }
 #else
         // Unix/Linux installation
-        if (rename(current_exe, backup_file) == 0 && 
-            rename(binary_path, current_exe) == 0 && 
-            chmod(current_exe, 0755) == 0) {
-            install_success = 1;
+        if (rename(current_exe, backup_file) == 0) {
+            if (rename(binary_path, current_exe) == 0) {
+                if (chmod(current_exe, 0755) == 0) {
+                    install_success = 1;
+                }
+            } else {
+                // Cross-device link (EXDEV) or rename failure: fall back to copying bytes
+                FILE *src_f = fopen(binary_path, "rb");
+                FILE *dst_f = fopen(current_exe, "wb");
+                if (src_f && dst_f) {
+                    char copy_buf[8192];
+                    size_t n;
+                    int copy_err = 0;
+                    while ((n = fread(copy_buf, 1, sizeof(copy_buf), src_f)) > 0) {
+                        if (fwrite(copy_buf, 1, n, dst_f) != n) {
+                            copy_err = 1;
+                            break;
+                        }
+                    }
+                    fclose(src_f);
+                    if (fclose(dst_f) != 0) copy_err = 1;
+                    if (!copy_err && chmod(current_exe, 0755) == 0) {
+                        unlink(binary_path);
+                        install_success = 1;
+                    }
+                } else {
+                    if (src_f) fclose(src_f);
+                    if (dst_f) fclose(dst_f);
+                }
+
+                if (!install_success) {
+                    // Rollback backup file to current_exe so binary is preserved!
+                    rename(backup_file, current_exe);
+                }
+            }
         }
 #endif
         
@@ -796,9 +954,7 @@ int download_and_install_update(const UpdateInfo *update_info, int auto_install)
             
             // Clean up temp files
             unlink(temp_file);
-            char cleanup_cmd[2048];
-            snprintf(cleanup_cmd, sizeof(cleanup_cmd), "rm -rf \"%s\"", extracted_file);
-            system(cleanup_cmd);
+            remove_directory_recursive(extracted_file);
         } else {
             print_error("Installation failed");
             print_colored("[*] ", COLOR_CYAN);

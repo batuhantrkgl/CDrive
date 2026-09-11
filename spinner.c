@@ -19,24 +19,22 @@ void *spinner_thread(void *arg) {
         cdrive_usleep(100000); // 100ms delay for smooth animation
     }
     
-    // Clear the spinner line when done
-    printf("\r");
-    for (int j = 0; j < (int)strlen(spinner->message) + 10; j++) {
-        printf(" ");
-    }
-    printf("\r");
+    // Clear the spinner line cleanly when done
+    printf("\r\033[K");
     fflush(stdout);
     
     return NULL;
 }
 
 void start_spinner(LoadingSpinner *spinner, const char *message) {
-    spinner->active = 1;
+    spinner->active = 0;
     strncpy(spinner->message, message, sizeof(spinner->message) - 1);
     spinner->message[sizeof(spinner->message) - 1] = '\0';
     
+    spinner->active = 1;
     if (pthread_create(&spinner->thread, NULL, spinner_thread, spinner) != 0) {
-        // If thread creation fails, just print the message without animation
+        // If thread creation fails, reset active so stop_spinner doesn't join uninitialized thread
+        spinner->active = 0;
         printf("%s\n", message);
     }
 }

@@ -21,10 +21,13 @@
     static HANDLE hConsole = INVALID_HANDLE_VALUE;
     static DWORD dwOriginalMode = 0;
     
+    static void disable_raw_mode(void);
+
     static void init_console(void) {
         if (hConsole == INVALID_HANDLE_VALUE) {
             hConsole = GetStdHandle(STD_INPUT_HANDLE); // Use STD_INPUT_HANDLE for console mode functions
             GetConsoleMode(hConsole, &dwOriginalMode);
+            atexit(disable_raw_mode);
         }
     }
     
@@ -45,6 +48,16 @@
         return _getch();
     }
 
+    static int cdrive_getch_timeout(int timeout_ms) {
+        int waited = 0;
+        while (!_kbhit()) {
+            if (waited >= timeout_ms) return -1;
+            Sleep(5);
+            waited += 5;
+        }
+        return _getch();
+    }
+
 #else // For Linux/macOS (non-Windows)
     // Dummy Winsock functions for non-Windows
     static int init_winsock(void) { return 0; }
@@ -53,26 +66,86 @@
     // Raw mode functions for Unix-like systems
     static struct termios original_termios;
     static int raw_mode_enabled = 0;
+    static int raw_mode_initialized = 0;
+
+    static void disable_raw_mode(void) {
+        if (raw_mode_enabled) {
+            tcsetattr(STDIN_FILENO, TCSANOW, &original_termios);
+            raw_mode_enabled = 0;
+        }
+    }
+
+    static void sig_cleanup_handler(int sig) {
+        disable_raw_mode();
+        signal(sig, SIG_DFL);
+        raise(sig);
+    }
 
     static void enable_raw_mode(void) {
-        if (!raw_mode_enabled) {
+        if (!raw_mode_initialized) {
             tcgetattr(STDIN_FILENO, &original_termios);
+            atexit(disable_raw_mode);
+            struct sigaction sa;
+            memset(&sa, 0, sizeof(sa));
+            sa.sa_handler = sig_cleanup_handler;
+            sigaction(SIGINT, &sa, NULL);
+            sigaction(SIGTERM, &sa, NULL);
+            sigaction(SIGHUP, &sa, NULL);
+            sigaction(SIGQUIT, &sa, NULL);
+            raw_mode_initialized = 1;
+        }
+        if (!raw_mode_enabled) {
             struct termios raw = original_termios;
             raw.c_lflag &= ~(ECHO | ICANON);
-            raw.c_cc[VMIN] = 0;
-            raw.c_cc[VTIME] = 1; // 0.1 second timeout
-            tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+            raw.c_cc[VMIN] = 1;
+            raw.c_cc[VTIME] = 0;
+            tcsetattr(STDIN_FILENO, TCSANOW, &raw);
             raw_mode_enabled = 1;
         }
     }
 
-    static void disable_raw_mode(void) {
-        if (raw_mode_enabled) {
-            tcsetattr(STDIN_FILENO, TCSAFLUSH, &original_termios);
-            raw_mode_enabled = 0;
+    static int cdrive_getch_timeout(int timeout_ms) {
+        fd_set fds;
+        FD_ZERO(&fds);
+        FD_SET(STDIN_FILENO, &fds);
+        struct timeval tv;
+        tv.tv_sec = timeout_ms / 1000;
+        tv.tv_usec = (timeout_ms % 1000) * 1000;
+        if (select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv) > 0) {
+            unsigned char c;
+            if (read(STDIN_FILENO, &c, 1) == 1) return c;
         }
+        return -1;
     }
 #endif // End of platform-specific block
+
+static void menu_move_up(int *selected, int *start_index, int num_options, int display_window_size) {
+    if (*selected > 0) {
+        (*selected)--;
+        if (*selected < *start_index) {
+            *start_index = *selected;
+        }
+    } else {
+        *selected = num_options - 1;
+        if (num_options > display_window_size) {
+            *start_index = num_options - display_window_size;
+        } else {
+            *start_index = 0;
+        }
+    }
+}
+
+static void menu_move_down(int *selected, int *start_index, int num_options, int display_window_size) {
+    if (*selected < num_options - 1) {
+        (*selected)++;
+        if (*selected >= *start_index + display_window_size) {
+            *start_index = *selected - display_window_size + 1;
+        }
+    } else {
+        *selected = 0;
+        *start_index = 0;
+    }
+}
 
 int show_interactive_menu(const char *question, const char **options, int num_options) {
     int selected = 0;
@@ -82,6 +155,8 @@ int show_interactive_menu(const char *question, const char **options, int num_op
     if (num_options < display_window_size) {
         display_window_size = num_options;
     }
+
+    enable_raw_mode();
 
     while (1) {
         printf("\033[2J\033[1;1H");
@@ -112,65 +187,46 @@ int show_interactive_menu(const char *question, const char **options, int num_op
 
         fflush(stdout);
 
-        enable_raw_mode();
         int ch = cdrive_getch();
         if (ch < 0) {
-            disable_raw_mode();
             continue;
         }
 
         if (ch == '\033') {
-            char seq[2];
-            int s0 = cdrive_getch();
-            if (s0 < 0) { disable_raw_mode(); continue; }
-            seq[0] = (char)s0;
-            int s1 = cdrive_getch();
-            if (s1 < 0) { disable_raw_mode(); continue; }
-            seq[1] = (char)s1;
-
-            if (seq[0] == '[') {
-                if (seq[1] == 'A') {
-                    selected = (selected > 0) ? selected - 1 : num_options - 1;
-                    if (selected < start_index) {
-                        start_index = selected;
-                    }
-                } else if (seq[1] == 'B') {
-                    selected = (selected < num_options - 1) ? selected + 1 : 0;
-                    if (selected >= start_index + display_window_size) {
-                        start_index = selected - display_window_size + 1;
-                    }
+            int s0 = cdrive_getch_timeout(50);
+            if (s0 < 0) {
+                disable_raw_mode();
+                printf("\033[2J\033[1;1H");
+                print_colored("[!] ", COLOR_YELLOW);
+                printf("Selection cancelled.\n");
+                return -1;
+            }
+            int s1 = cdrive_getch_timeout(50);
+            if (s0 == '[' && s1 >= 0) {
+                if (s1 == 'A') {
+                    menu_move_up(&selected, &start_index, num_options, display_window_size);
+                } else if (s1 == 'B') {
+                    menu_move_down(&selected, &start_index, num_options, display_window_size);
                 }
             }
 #ifdef _WIN32
         } else if (ch == 0xE0 || ch == 0x00) {
             int seq = cdrive_getch();
             if (seq == 0x48) {
-                selected = (selected > 0) ? selected - 1 : num_options - 1;
-                if (selected < start_index) {
-                    start_index = selected;
-                }
+                menu_move_up(&selected, &start_index, num_options, display_window_size);
             } else if (seq == 0x50) {
-                selected = (selected < num_options - 1) ? selected + 1 : 0;
-                if (selected >= start_index + display_window_size) {
-                    start_index = selected - display_window_size + 1;
-                }
+                menu_move_down(&selected, &start_index, num_options, display_window_size);
             }
 #endif
         } else {
             switch (ch) {
                 case 'k':
                 case 'K':
-                    selected = (selected > 0) ? selected - 1 : num_options - 1;
-                    if (selected < start_index) {
-                        start_index = selected;
-                    }
+                    menu_move_up(&selected, &start_index, num_options, display_window_size);
                     break;
                 case 'j':
                 case 'J':
-                    selected = (selected < num_options - 1) ? selected + 1 : 0;
-                    if (selected >= start_index + display_window_size) {
-                        start_index = selected - display_window_size + 1;
-                    }
+                    menu_move_down(&selected, &start_index, num_options, display_window_size);
                     break;
                 case '\n':
                 case '\r':
@@ -189,7 +245,6 @@ int show_interactive_menu(const char *question, const char **options, int num_op
                     return -1;
             }
         }
-        disable_raw_mode();
     }
 }
 
@@ -300,13 +355,36 @@ static int interactive_credential_setup(void) {
     }
     client_id[strcspn(client_id, "\n")] = 0; // Remove newline
     
-    // Ask for Client Secret
-    printf("%s? Client Secret:%s ", COLOR_CYAN, COLOR_RESET);
+    // Ask for Client Secret with echo disabled
+    printf("%s? Client Secret (hidden):%s ", COLOR_CYAN, COLOR_RESET);
+    fflush(stdout);
+#ifdef _WIN32
+    size_t sec_idx = 0;
+    int sec_ch;
+    while ((sec_ch = _getch()) != '\r' && sec_ch != '\n' && sec_ch != EOF) {
+        if (sec_ch == '\b' && sec_idx > 0) {
+            sec_idx--;
+        } else if (sec_idx < sizeof(client_secret) - 1 && sec_ch >= 32) {
+            client_secret[sec_idx++] = (char)sec_ch;
+        }
+    }
+    client_secret[sec_idx] = '\0';
+    printf("\n");
+#else
+    struct termios old_t, no_echo_t;
+    tcgetattr(STDIN_FILENO, &old_t);
+    no_echo_t = old_t;
+    no_echo_t.c_lflag &= ~ECHO;
+    tcsetattr(STDIN_FILENO, TCSANOW, &no_echo_t);
     if (!fgets(client_secret, sizeof(client_secret), stdin)) {
+        tcsetattr(STDIN_FILENO, TCSANOW, &old_t);
         print_error("Failed to read client secret");
         return -1;
     }
-    client_secret[strcspn(client_secret, "\n")] = 0; // Remove newline
+    tcsetattr(STDIN_FILENO, TCSANOW, &old_t);
+    printf("\n");
+    client_secret[strcspn(client_secret, "\r\n")] = '\0';
+#endif
     
     // Validate input
     if (strlen(client_id) < 10 || strlen(client_secret) < 10) {
@@ -314,18 +392,27 @@ static int interactive_credential_setup(void) {
         return -1;
     }
     
-    // Save to file
+    // Save to file with secure permissions (0600)
+#ifdef _WIN32
     FILE *file = fopen(config_path, "w");
+#else
+    int fd = open(config_path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    FILE *file = (fd >= 0) ? fdopen(fd, "w") : NULL;
+#endif
     if (!file) {
         print_error("Error creating credentials file");
         return -1;
     }
     
-    fprintf(file, "{\n");
-    fprintf(file, "  \"client_id\": \"%s\",\n", client_id);
-    fprintf(file, "  \"client_secret\": \"%s\"\n", client_secret);
-    fprintf(file, "}\n");
-    fclose(file);
+    json_object *creds_obj = json_object_new_object();
+    json_object_object_add(creds_obj, "client_id", json_object_new_string(client_id));
+    json_object_object_add(creds_obj, "client_secret", json_object_new_string(client_secret));
+    fprintf(file, "%s\n", json_object_to_json_string_ext(creds_obj, JSON_C_TO_STRING_PRETTY));
+    json_object_put(creds_obj);
+    if (fclose(file) != 0) {
+        print_error("Failed to write client credentials to disk");
+        return -1;
+    }
     
     print_colored("[+] ", COLOR_GREEN);
     printf("Credentials saved successfully!\n");
@@ -335,6 +422,10 @@ static int interactive_credential_setup(void) {
 int load_client_credentials(ClientCredentials *creds) {
     char config_path[MAX_PATH_SIZE];
     const char *home_dir = getenv(HOME_ENV);
+    if (!home_dir) {
+        print_error("Unable to determine home directory");
+        return -1;
+    }
     
     snprintf(config_path, sizeof(config_path), "%s%s%s%s%s", home_dir, PATH_SEP, CONFIG_DIR, PATH_SEP, CLIENT_ID_FILE);
     
@@ -363,9 +454,18 @@ int load_client_credentials(ClientCredentials *creds) {
         return -1;
     }
     
-    json_object *client_id_obj, *client_secret_obj;
-    if (!json_object_object_get_ex(root, "client_id", &client_id_obj) ||
-        !json_object_object_get_ex(root, "client_secret", &client_secret_obj)) {
+    json_object *client_id_obj = NULL, *client_secret_obj = NULL;
+    json_object *installed_obj = NULL, *web_obj = NULL;
+    json_object *container = root;
+
+    if (json_object_object_get_ex(root, "installed", &installed_obj)) {
+        container = installed_obj;
+    } else if (json_object_object_get_ex(root, "web", &web_obj)) {
+        container = web_obj;
+    }
+
+    if (!json_object_object_get_ex(container, "client_id", &client_id_obj) ||
+        !json_object_object_get_ex(container, "client_secret", &client_secret_obj)) {
         print_error("Invalid client credentials format");
         json_object_put(root);
         return -1;
@@ -409,7 +509,11 @@ int cdrive_api_get(const char *url, APIResponse *response) {
 
         CURL *curl = curl_easy_init();
         if (!curl) {
-            if (response->data) free(response->data);
+            if (response->data) {
+                free(response->data);
+                response->data = NULL;
+                response->size = 0;
+            }
             return -1;
         }
 
@@ -421,6 +525,8 @@ int cdrive_api_get(const char *url, APIResponse *response) {
         curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_response_callback);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, response);
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+        curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
 
@@ -438,11 +544,44 @@ int cdrive_api_get(const char *url, APIResponse *response) {
         if (response->data) { free(response->data); response->data = NULL; response->size = 0; }
     }
 
-    if (response->data) { free(response->data); response->data = NULL; }
+    if (response->data) { free(response->data); response->data = NULL; response->size = 0; }
     return -1;
 }
 
-int start_local_server(char *auth_code, const char *auth_url, int open_browser) {
+static int open_browser_url(const char *url) {
+#ifdef _WIN32
+    HINSTANCE res = ShellExecuteA(NULL, "open", url, NULL, NULL, SW_SHOWNORMAL);
+    return ((intptr_t)res > 32) ? 0 : -1;
+#else
+    pid_t pid = fork();
+    if (pid == 0) {
+        int devnull = open("/dev/null", O_RDWR);
+        if (devnull != -1) {
+            dup2(devnull, STDIN_FILENO);
+            dup2(devnull, STDOUT_FILENO);
+            dup2(devnull, STDERR_FILENO);
+            close(devnull);
+        }
+#ifdef __APPLE__
+        char *const args_open[] = {"open", (char *)url, NULL};
+        execvp("open", args_open);
+#else
+        char *const args_xdg[] = {"xdg-open", (char *)url, NULL};
+        execvp("xdg-open", args_xdg);
+        char *const args_open[] = {"open", (char *)url, NULL};
+        execvp("open", args_open);
+#endif
+        _exit(127);
+    } else if (pid > 0) {
+        int status;
+        waitpid(pid, &status, 0);
+        return (WIFEXITED(status) && WEXITSTATUS(status) == 0) ? 0 : -1;
+    }
+    return -1;
+#endif
+}
+
+int start_local_server(char *auth_code, size_t max_code_len, const char *auth_url, int open_browser) {
     cdrive_socket_t server_fd, new_socket;
     struct sockaddr_in address;
     int opt = 1;
@@ -479,14 +618,37 @@ int start_local_server(char *auth_code, const char *auth_url, int open_browser) 
         cdrive_socket_close(server_fd);
         return -1;
     }
+
+#ifdef _WIN32
+    DWORD rcv_timeout = 120000;
+    setsockopt(server_fd, SOL_SOCKET, SO_RCVTIMEO, (const char *)&rcv_timeout, sizeof(rcv_timeout));
+#else
+    struct timeval tv = { .tv_sec = 120, .tv_usec = 0 };
+    setsockopt(server_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+#endif
     
     address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     address.sin_port = htons(8080);
     
     // Bind socket
     if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
-        perror("bind failed");
+#ifdef _WIN32
+        int err = WSAGetLastError();
+        if (err == WSAEADDRINUSE) {
+            print_error("Port 8080 is already in use by another application.");
+            print_info("Please free port 8080 or use 'cdrive auth login --no-browser'.");
+        } else {
+            perror("bind failed");
+        }
+#else
+        if (errno == EADDRINUSE) {
+            print_error("Port 8080 is already in use by another application.");
+            print_info("Please free port 8080 or use 'cdrive auth login --no-browser'.");
+        } else {
+            perror("bind failed");
+        }
+#endif
         cdrive_socket_close(server_fd);
         return -1;
     }
@@ -498,30 +660,22 @@ int start_local_server(char *auth_code, const char *auth_url, int open_browser) 
         return -1;
     }
     
-    print_colored("[*] ", COLOR_YELLOW);
-    printf("Starting authentication server...\n");
-    
     LoadingSpinner spinner = {0};
-    start_spinner(&spinner, "Waiting for authentication callback...");
+    if (open_browser) {
+        print_colored("[*] ", COLOR_YELLOW);
+        printf("Starting authentication server...\n");
+        start_spinner(&spinner, "Waiting for authentication callback...");
+    }
     
     // Open browser if requested
     if (open_browser) {
         // Temporarily stop spinner for clean browser opening message
         stop_spinner(&spinner);
         
-#ifdef _WIN32
-        char open_cmd[MAX_CMD_SIZE];
-        snprintf(open_cmd, sizeof(open_cmd), "start \"\" \"%s\"", auth_url);
-#else
-        char open_cmd[MAX_CMD_SIZE];
-        snprintf(open_cmd, sizeof(open_cmd), "xdg-open \"%s\" 2>/dev/null || open \"%s\" 2>/dev/null", 
-                 auth_url, auth_url);
-#endif
-        
         printf("\n");  // Ensure we're on a new line
         print_colored("\n[>] ", COLOR_GREEN);
         printf("Opening browser...\n");
-        int browser_result = system(open_cmd);
+        int browser_result = open_browser_url(auth_url);
         
         if (browser_result != 0) {
             print_warning("Could not automatically open browser. Please copy the URL above and paste it into your browser manually.");
@@ -535,13 +689,58 @@ int start_local_server(char *auth_code, const char *auth_url, int open_browser) 
     while (strlen(auth_code) == 0) {
         addrlen = sizeof(address);
         if ((new_socket = accept(server_fd, (struct sockaddr *)&address, &addrlen)) == CDRIVE_INVALID_SOCKET) {
+#ifdef _WIN32
+            int wsa_err = WSAGetLastError();
+            if (wsa_err == WSAEINTR) continue;
+            if (wsa_err == WSAEWOULDBLOCK || wsa_err == WSAETIMEDOUT) {
+                if (open_browser) stop_spinner(&spinner);
+                print_error("Authentication timed out after 2 minutes.");
+                break;
+            }
+#else
             if (errno == EINTR) continue;
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                if (open_browser) stop_spinner(&spinner);
+                print_error("Authentication timed out after 2 minutes.");
+                break;
+            }
+#endif
             perror("accept");
             break;
         }
 
         memset(buffer, 0, sizeof(buffer));
-        cdrive_socket_read(new_socket, buffer, (int)sizeof(buffer) - 1);
+        int bytes_read = cdrive_socket_read(new_socket, buffer, (int)sizeof(buffer) - 1);
+        if (bytes_read <= 0) {
+            cdrive_socket_close(new_socket);
+            continue;
+        }
+        buffer[bytes_read] = '\0';
+
+        // Check if user denied or cancelled authorization
+        char *error_start = strstr(buffer, "error=");
+        if (error_start) {
+            error_start += 6;
+            char *error_end = strchr(error_start, '&');
+            if (!error_end) error_end = strchr(error_start, ' ');
+            size_t err_len = error_end ? (size_t)(error_end - error_start) : strlen(error_start);
+            char err_buf[128];
+            if (err_len >= sizeof(err_buf)) err_len = sizeof(err_buf) - 1;
+            memcpy(err_buf, error_start, err_len);
+            err_buf[err_len] = '\0';
+
+            const char *error_html =
+                "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n"
+                "<!DOCTYPE html><html><body><h1>Authentication Cancelled</h1>"
+                "<p>Authorization was denied or cancelled.</p></body></html>";
+            cdrive_socket_write(new_socket, error_html, (int)strlen(error_html));
+            cdrive_socket_close(new_socket);
+
+            if (open_browser) stop_spinner(&spinner);
+            print_error("Authorization was denied or cancelled");
+            fprintf(stderr, "Reason: %s\n", err_buf);
+            break;
+        }
 
         // Parse authorization code from request
         char *code_start = strstr(buffer, "code=");
@@ -549,19 +748,18 @@ int start_local_server(char *auth_code, const char *auth_url, int open_browser) 
             code_start += 5; // Skip "code="
             char *code_end = strchr(code_start, '&');
             if (!code_end) code_end = strchr(code_start, ' ');
-            if (code_end) {
-                size_t code_length = code_end - code_start;
-                if (code_length < 256) {
-                    strncpy(auth_code, code_start, code_length);
-                    auth_code[code_length] = '\0';
-                }
-            } else {
-                size_t remaining = strlen(code_start);
-                if (remaining < 256) {
-                    strncpy(auth_code, code_start, remaining);
-                    auth_code[remaining] = '\0';
-                }
-            }
+            size_t code_len = code_end ? (size_t)(code_end - code_start) : strlen(code_start);
+            char raw_code[1024];
+            if (code_len >= sizeof(raw_code)) code_len = sizeof(raw_code) - 1;
+            memcpy(raw_code, code_start, code_len);
+            raw_code[code_len] = '\0';
+
+            char *decoded_code = url_decode(raw_code);
+            const char *final_code = decoded_code ? decoded_code : raw_code;
+            strncpy(auth_code, final_code, max_code_len - 1);
+            auth_code[max_code_len - 1] = '\0';
+            if (decoded_code) free(decoded_code);
+
             // Send success response
             cdrive_socket_write(new_socket, response_html, (int)strlen(response_html));
             cdrive_socket_close(new_socket);
@@ -574,7 +772,9 @@ int start_local_server(char *auth_code, const char *auth_url, int open_browser) 
         }
     }
 
-    stop_spinner(&spinner);
+    if (open_browser) {
+        stop_spinner(&spinner);
+    }
     cdrive_socket_close(server_fd);
 
     return strlen(auth_code) > 0 ? 0 : -1;
@@ -593,6 +793,18 @@ char *url_encode(const char *str) {
     return result;
 }
 
+char *url_decode(const char *str) {
+    if (!str) return NULL;
+    CURL *curl = curl_easy_init();
+    if (!curl) return strdup(str);
+    int outlen = 0;
+    char *decoded = curl_easy_unescape(curl, str, 0, &outlen);
+    char *result = decoded ? strdup(decoded) : strdup(str);
+    if (decoded) curl_free(decoded);
+    curl_easy_cleanup(curl);
+    return result;
+}
+
 static int exchange_code_for_tokens(const char *auth_code, OAuthTokens *tokens) {
     CURL *curl;
     CURLcode res;
@@ -604,12 +816,18 @@ static int exchange_code_for_tokens(const char *auth_code, OAuthTokens *tokens) 
         return -1;
     }
     
-    // URL encode the authorization code and redirect URI
+    // URL encode all parameters
     char *encoded_code = url_encode(auth_code);
+    char *encoded_client_id = url_encode(g_client_creds.client_id);
+    char *encoded_client_secret = url_encode(g_client_creds.client_secret);
     char *encoded_redirect = url_encode(REDIRECT_URI);
     
-    if (!encoded_code || !encoded_redirect) {
+    if (!encoded_code || !encoded_client_id || !encoded_client_secret || !encoded_redirect) {
         print_error("Error encoding parameters");
+        if (encoded_code) free(encoded_code);
+        if (encoded_client_id) free(encoded_client_id);
+        if (encoded_client_secret) free(encoded_client_secret);
+        if (encoded_redirect) free(encoded_redirect);
         curl_easy_cleanup(curl);
         return -1;
     }
@@ -618,9 +836,11 @@ static int exchange_code_for_tokens(const char *auth_code, OAuthTokens *tokens) 
     char post_data[2048];
     snprintf(post_data, sizeof(post_data),
         "code=%s&client_id=%s&client_secret=%s&redirect_uri=%s&grant_type=authorization_code",
-        encoded_code, g_client_creds.client_id, g_client_creds.client_secret, encoded_redirect);
+        encoded_code, encoded_client_id, encoded_client_secret, encoded_redirect);
     
     free(encoded_code);
+    free(encoded_client_id);
+    free(encoded_client_secret);
     free(encoded_redirect);
     
     // Set curl options
@@ -628,6 +848,8 @@ static int exchange_code_for_tokens(const char *auth_code, OAuthTokens *tokens) 
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post_data);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_response_callback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
     
     print_colored("[>] ", COLOR_BLUE);
     printf("Exchanging authorization code for access tokens...\n");
@@ -652,7 +874,20 @@ static int exchange_code_for_tokens(const char *auth_code, OAuthTokens *tokens) 
     
     if (http_code != 200) {
         print_error("HTTP error during token exchange");
-        if (response.data) free(response.data);
+        if (response.data) {
+            json_object *err_root = json_tokener_parse(response.data);
+            if (err_root) {
+                json_object *err_obj = NULL, *desc_obj = NULL;
+                if (json_object_object_get_ex(err_root, "error", &err_obj)) {
+                    fprintf(stderr, "Error: %s\n", json_object_get_string(err_obj));
+                }
+                if (json_object_object_get_ex(err_root, "error_description", &desc_obj)) {
+                    fprintf(stderr, "Description: %s\n", json_object_get_string(desc_obj));
+                }
+                json_object_put(err_root);
+            }
+            free(response.data);
+        }
         return -1;
     }
     
@@ -669,16 +904,19 @@ static int exchange_code_for_tokens(const char *auth_code, OAuthTokens *tokens) 
     if (json_object_object_get_ex(root, "access_token", &access_token_obj)) {
         strncpy(tokens->access_token, json_object_get_string(access_token_obj), 
                 sizeof(tokens->access_token) - 1);
+        tokens->access_token[sizeof(tokens->access_token) - 1] = '\0';
     }
     
     if (json_object_object_get_ex(root, "refresh_token", &refresh_token_obj)) {
         strncpy(tokens->refresh_token, json_object_get_string(refresh_token_obj), 
                 sizeof(tokens->refresh_token) - 1);
+        tokens->refresh_token[sizeof(tokens->refresh_token) - 1] = '\0';
     }
     
     if (json_object_object_get_ex(root, "token_type", &token_type_obj)) {
         strncpy(tokens->token_type, json_object_get_string(token_type_obj), 
                 sizeof(tokens->token_type) - 1);
+        tokens->token_type[sizeof(tokens->token_type) - 1] = '\0';
     }
     
     if (json_object_object_get_ex(root, "expires_in", &expires_in_obj)) {
@@ -714,17 +952,36 @@ int refresh_access_token(OAuthTokens *tokens) {
         return -1;
     }
 
+    char *encoded_client_id = url_encode(g_client_creds.client_id);
+    char *encoded_client_secret = url_encode(g_client_creds.client_secret);
+    char *encoded_refresh_token = url_encode(tokens->refresh_token);
+
+    if (!encoded_client_id || !encoded_client_secret || !encoded_refresh_token) {
+        print_error("Error encoding parameters for token refresh");
+        if (encoded_client_id) free(encoded_client_id);
+        if (encoded_client_secret) free(encoded_client_secret);
+        if (encoded_refresh_token) free(encoded_refresh_token);
+        curl_easy_cleanup(curl);
+        return -1;
+    }
+
     // Prepare POST data
     char post_data[2048];
     snprintf(post_data, sizeof(post_data),
         "client_id=%s&client_secret=%s&refresh_token=%s&grant_type=refresh_token",
-        g_client_creds.client_id, g_client_creds.client_secret, tokens->refresh_token);
+        encoded_client_id, encoded_client_secret, encoded_refresh_token);
+
+    free(encoded_client_id);
+    free(encoded_client_secret);
+    free(encoded_refresh_token);
 
     // Set curl options
     curl_easy_setopt(curl, CURLOPT_URL, OAUTH_TOKEN_URL);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post_data);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_response_callback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
 
     // Perform request
     res = curl_easy_perform(curl);
@@ -748,6 +1005,7 @@ int refresh_access_token(OAuthTokens *tokens) {
     json_object *access_token_obj, *expires_in_obj;
     if (json_object_object_get_ex(root, "access_token", &access_token_obj)) {
         strncpy(tokens->access_token, json_object_get_string(access_token_obj), sizeof(tokens->access_token) - 1);
+        tokens->access_token[sizeof(tokens->access_token) - 1] = '\0';
     }
 
     if (json_object_object_get_ex(root, "expires_in", &expires_in_obj)) {
@@ -807,10 +1065,14 @@ int cdrive_auth_login(int headless) {
     printf("Starting Google Drive authentication...\n\n");
 
     // URL encode parameters
+    char *encoded_client_id = url_encode(g_client_creds.client_id);
     char *encoded_redirect = url_encode(REDIRECT_URI);
     char *encoded_scope = url_encode(SCOPE);
 
-    if (!encoded_redirect || !encoded_scope) {
+    if (!encoded_client_id || !encoded_redirect || !encoded_scope) {
+        if (encoded_client_id) free(encoded_client_id);
+        if (encoded_redirect) free(encoded_redirect);
+        if (encoded_scope) free(encoded_scope);
         print_error("Error encoding parameters");
         return -1;
     }
@@ -818,8 +1080,9 @@ int cdrive_auth_login(int headless) {
     // Build authorization URL
     snprintf(auth_url, sizeof(auth_url),
         "%s?client_id=%s&redirect_uri=%s&scope=%s&response_type=code&access_type=offline&prompt=consent",
-        OAUTH_AUTH_URL, g_client_creds.client_id, encoded_redirect, encoded_scope);
+        OAUTH_AUTH_URL, encoded_client_id, encoded_redirect, encoded_scope);
 
+    free(encoded_client_id);
     free(encoded_redirect);
     free(encoded_scope);
 
@@ -847,14 +1110,29 @@ int cdrive_auth_login(int headless) {
             if (!code_end) {
                 code_end = strchr(code_start, ' ');
             }
-            if (code_end) {
-                size_t code_length = code_end - code_start;
-                strncpy(auth_code, code_start, code_length);
-                auth_code[code_length] = '\0';
-            } else {
-                // if no '&' or ' ' is found, the code is the rest of the string
-                strncpy(auth_code, code_start, sizeof(auth_code) - 1);
-                auth_code[sizeof(auth_code) - 1] = '\0';
+            size_t code_len = code_end ? (size_t)(code_end - code_start) : strlen(code_start);
+            char raw_code[1024];
+            if (code_len >= sizeof(raw_code)) code_len = sizeof(raw_code) - 1;
+            memcpy(raw_code, code_start, code_len);
+            raw_code[code_len] = '\0';
+
+            char *decoded_code = url_decode(raw_code);
+            const char *final_code = decoded_code ? decoded_code : raw_code;
+            strncpy(auth_code, final_code, sizeof(auth_code) - 1);
+            auth_code[sizeof(auth_code) - 1] = '\0';
+            if (decoded_code) free(decoded_code);
+        } else if (strlen(redirected_url) > 0) {
+            // User pasted the raw authorization code directly
+            const char *raw = redirected_url;
+            while (*raw == ' ' || *raw == '\t') raw++;
+            char *decoded_code = url_decode(raw);
+            const char *final_code = decoded_code ? decoded_code : raw;
+            strncpy(auth_code, final_code, sizeof(auth_code) - 1);
+            auth_code[sizeof(auth_code) - 1] = '\0';
+            if (decoded_code) free(decoded_code);
+            size_t len = strlen(auth_code);
+            while (len > 0 && (auth_code[len - 1] == ' ' || auth_code[len - 1] == '\r' || auth_code[len - 1] == '\t')) {
+                auth_code[--len] = '\0';
             }
         }
 
@@ -880,7 +1158,7 @@ int cdrive_auth_login(int headless) {
 #ifdef _WIN32
         // Windows: Use simple synchronous approach (no fork)
         // Start server and wait for callback (spinner is handled inside start_local_server)
-        if (start_local_server(auth_code, auth_url, 1) != 0) {
+        if (start_local_server(auth_code, sizeof(auth_code), auth_url, 1) != 0) {
             print_error("Failed to receive authorization callback");
             cleanup_winsock();
             return -1;
@@ -903,7 +1181,7 @@ int cdrive_auth_login(int headless) {
             close(pipefd[0]); // Close read end in child
 
             char temp_auth_code[256] = {0};
-            int result = start_local_server(temp_auth_code, auth_url, 0);
+            int result = start_local_server(temp_auth_code, sizeof(temp_auth_code), auth_url, 0);
 
             if (result == 0 && strlen(temp_auth_code) > 0) {
                 // Send the auth code to parent via pipe
@@ -919,13 +1197,9 @@ int cdrive_auth_login(int headless) {
             // Give child process time to bind and listen on port 8080
             cdrive_usleep(150000);
 
-            // Open browser
-            char open_cmd[MAX_CMD_SIZE];
-            snprintf(open_cmd, sizeof(open_cmd), "xdg-open \"%s\" 2>/dev/null || open \"%s\" 2>/dev/null",
-                     auth_url, auth_url);
             print_colored("\n[>] ", COLOR_GREEN);
             printf("Opening browser...\n");
-            int browser_result = system(open_cmd);
+            int browser_result = open_browser_url(auth_url);
 
             if (browser_result != 0) {
                 print_warning("Could not automatically open browser. Please copy the URL above and paste it into your browser manually.");
@@ -942,7 +1216,10 @@ int cdrive_auth_login(int headless) {
             while (1) {
                 wait_result = waitpid(server_pid, &status, WNOHANG);
                 if (wait_result == server_pid) break;
-                if (wait_result == -1) break;
+                if (wait_result == -1) {
+                    if (errno == EINTR) continue;
+                    break;
+                }
                 if (difftime(time(NULL), wait_start) > 300.0) {
                     kill(server_pid, SIGTERM);
                     waitpid(server_pid, &status, 0);
@@ -957,7 +1234,7 @@ int cdrive_auth_login(int headless) {
 
             stop_spinner(&auth_spinner);
 
-            if (WEXITSTATUS(status) != 0) {
+            if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
                 print_error("Failed to receive authorization callback");
                 close(pipefd[0]);
                 cleanup_winsock();
@@ -981,20 +1258,16 @@ int cdrive_auth_login(int headless) {
             close(pipefd[1]);
             print_warning("Could not fork process, using fallback method");
 
-            // Open browser
-            char open_cmd[MAX_CMD_SIZE];
-            snprintf(open_cmd, sizeof(open_cmd), "xdg-open \"%s\" 2>/dev/null || open \"%s\" 2>/dev/null",
-                     auth_url, auth_url);
             print_colored("\n[>] ", COLOR_GREEN);
             printf("Opening browser...\n");
-            system(open_cmd);
+            open_browser_url(auth_url);
 
             // Start spinner for waiting
             LoadingSpinner auth_spinner = {0};
             start_spinner(&auth_spinner, "Waiting for authentication callback...");
 
-            // Start local server to receive callback
-            if (start_local_server(auth_code, auth_url, 1) != 0) {
+            // Start local server to receive callback without re-opening browser
+            if (start_local_server(auth_code, sizeof(auth_code), auth_url, 0) != 0) {
                 stop_spinner(&auth_spinner);
                 print_error("Failed to receive authorization callback");
                 cleanup_winsock();
@@ -1037,29 +1310,44 @@ int cdrive_auth_login(int headless) {
 int save_tokens(const OAuthTokens *tokens) {
     char token_path[MAX_PATH_SIZE];
     const char *home_dir = getenv(HOME_ENV);
+    if (!home_dir) {
+        print_error("Unable to determine home directory");
+        return -1;
+    }
     
     snprintf(token_path, sizeof(token_path), "%s%s%s%s%s", home_dir, PATH_SEP, CONFIG_DIR, PATH_SEP, TOKEN_FILE);
     
+#ifdef _WIN32
     FILE *file = fopen(token_path, "w");
+#else
+    int fd = open(token_path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    FILE *file = (fd >= 0) ? fdopen(fd, "w") : NULL;
+#endif
     if (!file) {
         perror("Error saving tokens");
         return -1;
     }
     
-    fprintf(file, "{\n");
-    fprintf(file, "  \"access_token\": \"%s\",\n", tokens->access_token);
-    fprintf(file, "  \"refresh_token\": \"%s\",\n", tokens->refresh_token);
-    fprintf(file, "  \"token_type\": \"%s\",\n", tokens->token_type);
-    fprintf(file, "  \"expires_in\": %d\n", tokens->expires_in);
-    fprintf(file, "}\n");
+    json_object *tok_obj = json_object_new_object();
+    json_object_object_add(tok_obj, "access_token", json_object_new_string(tokens->access_token));
+    json_object_object_add(tok_obj, "refresh_token", json_object_new_string(tokens->refresh_token));
+    json_object_object_add(tok_obj, "token_type", json_object_new_string(tokens->token_type));
+    json_object_object_add(tok_obj, "expires_in", json_object_new_int(tokens->expires_in));
+
+    fprintf(file, "%s\n", json_object_to_json_string_ext(tok_obj, JSON_C_TO_STRING_PRETTY));
+    json_object_put(tok_obj);
     
-    fclose(file);
+    if (fclose(file) != 0) {
+        perror("Error saving tokens");
+        return -1;
+    }
     return 0;
 }
 
 int load_tokens(OAuthTokens *tokens) {
     char token_path[MAX_PATH_SIZE];
     const char *home_dir = getenv(HOME_ENV);
+    if (!home_dir) return -1;
     
     snprintf(token_path, sizeof(token_path), "%s%s%s%s%s", home_dir, PATH_SEP, CONFIG_DIR, PATH_SEP, TOKEN_FILE);
     
@@ -1110,7 +1398,7 @@ int get_user_info(char *user_name, size_t name_size) {
         return -1;
     }
 
-    if (cdrive_api_get("https://www.googleapis.com/drive/v3/about?fields=user", &response) != 0) {
+    if (cdrive_api_get("https://www.googleapis.com/drive/v3/about?fields=user(displayName,emailAddress)", &response) != 0) {
         return -1;
     }
 
@@ -1118,18 +1406,22 @@ int get_user_info(char *user_name, size_t name_size) {
     if (response.data) {
         json_object *root = json_tokener_parse(response.data);
         if (root) {
-            json_object *user_obj, *display_name_obj;
-            
-            if (json_object_object_get_ex(root, "user", &user_obj) &&
-                json_object_object_get_ex(user_obj, "displayName", &display_name_obj)) {
-                
-                const char *name = json_object_get_string(display_name_obj);
-                strncpy(user_name, name, name_size - 1);
-                user_name[name_size - 1] = '\0';
-                
-                json_object_put(root);
-                free(response.data);
-                return 0;
+            json_object *user_obj, *display_name_obj, *email_obj;
+            if (json_object_object_get_ex(root, "user", &user_obj)) {
+                const char *name = NULL;
+                if (json_object_object_get_ex(user_obj, "displayName", &display_name_obj)) {
+                    name = json_object_get_string(display_name_obj);
+                }
+                if ((!name || !*name) && json_object_object_get_ex(user_obj, "emailAddress", &email_obj)) {
+                    name = json_object_get_string(email_obj);
+                }
+                if (name && *name) {
+                    strncpy(user_name, name, name_size - 1);
+                    user_name[name_size - 1] = '\0';
+                    json_object_put(root);
+                    free(response.data);
+                    return 0;
+                }
             }
             json_object_put(root);
         }
@@ -1137,4 +1429,29 @@ int get_user_info(char *user_name, size_t name_size) {
     }
     
     return -1;
+}
+
+int cdrive_auth_logout(void) {
+    char token_path[MAX_PATH_SIZE];
+    const char *home_dir = getenv(HOME_ENV);
+    if (!home_dir) {
+        print_error("Unable to determine home directory");
+        return -1;
+    }
+    snprintf(token_path, sizeof(token_path), "%s%s%s%s%s", home_dir, PATH_SEP, CONFIG_DIR, PATH_SEP, TOKEN_FILE);
+    
+    // Scrub sensitive tokens from memory
+    memset(&g_tokens, 0, sizeof(g_tokens));
+
+    if (unlink(token_path) != 0 && errno != ENOENT) {
+        perror("Error removing token file");
+        return -1;
+    }
+
+    if (g_json_mode) {
+        printf("{\"status\":\"success\",\"message\":\"Logged out successfully\"}\n");
+    } else {
+        print_success("Successfully logged out from Google Drive.");
+    }
+    return 0;
 }
