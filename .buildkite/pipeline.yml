@@ -297,10 +297,12 @@ steps:
       curl -sL https://curl.se/download/curl-8.12.1.tar.gz | tar xz
       cd curl-8.12.1
       CC=/opt/osxcross/bin/o64-clang \
+      AR=/opt/osxcross/bin/x86_64-apple-darwin21.4-ar \
+      RANLIB=/opt/osxcross/bin/x86_64-apple-darwin21.4-ranlib \
       CFLAGS="-isysroot /opt/osxcross/SDK/MacOSX12.3.sdk -mmacosx-version-min=10.15" \
       LDFLAGS="-isysroot /opt/osxcross/SDK/MacOSX12.3.sdk" \
       ./configure \
-        --host=x86_64-apple-darwin \
+        --host=x86_64-apple-darwin21.4 \
         --build=x86_64-pc-linux-gnu \
         --with-sysroot=/opt/osxcross/SDK/MacOSX12.3.sdk \
         --prefix=/opt/osxcross/target \
@@ -310,8 +312,8 @@ steps:
         --disable-telnet --disable-tftp --disable-pop3 --disable-imap \
         --disable-smtp --disable-gopher --disable-mqtt --disable-manual
       make -C lib -j$(nproc)
-      # Copy .a directly to avoid Linux ranlib corrupting the macOS table of contents
       cp lib/.libs/libcurl.a /opt/osxcross/target/lib/libcurl.a
+      /opt/osxcross/bin/x86_64-apple-darwin21.4-ranlib /opt/osxcross/target/lib/libcurl.a
       mkdir -p /opt/osxcross/target/include/curl
       cp include/curl/*.h /opt/osxcross/target/include/curl/
 
@@ -367,10 +369,12 @@ steps:
       curl -sL https://curl.se/download/curl-8.12.1.tar.gz | tar xz
       cd curl-8.12.1
       CC=/opt/osxcross/bin/oa64-clang \
+      AR=/opt/osxcross/bin/arm64-apple-darwin21.4-ar \
+      RANLIB=/opt/osxcross/bin/arm64-apple-darwin21.4-ranlib \
       CFLAGS="-isysroot /opt/osxcross/SDK/MacOSX12.3.sdk -mmacosx-version-min=11.0" \
       LDFLAGS="-isysroot /opt/osxcross/SDK/MacOSX12.3.sdk" \
       ./configure \
-        --host=aarch64-apple-darwin \
+        --host=arm64-apple-darwin21.4 \
         --build=x86_64-pc-linux-gnu \
         --with-sysroot=/opt/osxcross/SDK/MacOSX12.3.sdk \
         --prefix=/opt/osxcross/target \
@@ -380,8 +384,8 @@ steps:
         --disable-telnet --disable-tftp --disable-pop3 --disable-imap \
         --disable-smtp --disable-gopher --disable-mqtt --disable-manual
       make -C lib -j$(nproc)
-      # Copy .a directly to avoid Linux ranlib corrupting the macOS table of contents
       cp lib/.libs/libcurl.a /opt/osxcross/target/lib/libcurl.a
+      /opt/osxcross/bin/arm64-apple-darwin21.4-ranlib /opt/osxcross/target/lib/libcurl.a
       mkdir -p /opt/osxcross/target/include/curl
       cp include/curl/*.h /opt/osxcross/target/include/curl/
 
