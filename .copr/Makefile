@@ -11,7 +11,9 @@ srpm:
 	@version=$$(grep 'CDRIVE_VERSION' cdrive.h | cut -d'"' -f2); \
 	if [ -z "$$version" ]; then version="1.0.3"; fi; \
 	echo "Building source archive for cdrive $$version..."; \
-	git archive --format=tar.gz --prefix=CDrive-$$version/ -o $(outdir)/cdrive-$$version.tar.gz HEAD; \
+	tar --exclude='./.git' --exclude='./out' --exclude='./sysroot' --exclude='./*.rpm' \
+		--transform "s,^\.,CDrive-$$version," \
+		-czf $(outdir)/cdrive-$$version.tar.gz . ; \
 	rpmbuild -bs \
 		--define "_sourcedir $(outdir)" \
 		--define "_srcrpmdir $(outdir)" \
